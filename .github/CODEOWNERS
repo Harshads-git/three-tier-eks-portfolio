@@ -1,0 +1,24 @@
+# CODEOWNERS
+# This file defines ownership for different parts of the codebase.
+# When a PR modifies these paths, GitHub will automatically request
+# a review from the designated owner.
+#
+# Pattern syntax: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Global default owner — owns everything not matched below
+*                           @Harshads-git
+
+# Application code
+app/frontend/               @Harshads-git
+app/backend/                @Harshads-git
+
+# Infrastructure — extra protection on Terraform files
+terraform/                  @Harshads-git
+.github/workflows/          @Harshads-git
+
+# Kubernetes manifests
+k8s/                        @Harshads-git
+
+# Documentation
+docs/                       @Harshads-git
+README.md                   @Harshads-git
