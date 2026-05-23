@@ -1,0 +1,3 @@
+# .keep files act as placeholders to track empty directories in git.
+# Git does not track empty directories by default.
+# These files will be replaced with real content as the project progresses.
