@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<!--
+  public/index.html — The HTML shell that React mounts into
+
+  HOW THIS WORKS:
+  ---------------
+  This file is the ONLY HTML file in the entire React SPA. React renders everything
+  dynamically into <div id="root">. When `npm run build` runs, webpack:
+    1. Copies this file to build/index.html
+    2. Injects <script> tags for the compiled JS bundle (main.xxx.js)
+    3. Injects <link> tags for the compiled CSS bundle (main.xxx.css)
+    4. Replaces %PUBLIC_URL% with the configured public path
+
+  KUBERNETES / NGINX CONTEXT:
+  ---------------------------
+  Nginx serves this file for ALL requests that match /* in its try_files config.
+  For example:
+    - GET /           → serve index.html → React renders the app
+    - GET /tasks      → serve index.html → React Router handles /tasks
+    - GET /api/tasks  → PROXY to backend (via Nginx upstream config)
+    - GET /static/js/ → serve directly from build/static/ (cache forever!)
+
+  This is why the Nginx config (added in Day 7) is critical — without try_files,
+  refreshing the browser on any non-root path would return a 404.
+
+  SEO NOTE:
+  ---------
+  React SPAs are inherently bad for SEO because the HTML shell is mostly empty.
+  For production SEO, you'd use Next.js (SSR) or React with react-helmet for meta tags.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
+
+    <!--
+      viewport: Makes the app responsive on mobile devices.
+      width=device-width: Sets page width to follow device screen width.
+      initial-scale=1: Prevents browser from zooming in on load.
+    -->
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <!--
+      theme-color: Sets the browser toolbar color on mobile browsers (Android Chrome).
+      Matches the app's primary color.
+    -->
+    <meta name="theme-color" content="#3f51b5" />
+
+    <!--
+      SEO Meta Tags:
+      In a production app with multiple pages, use react-helmet to set
+      page-specific title and description tags dynamically.
+    -->
+    <meta
+      name="description"
+      content="Three-Tier EKS Portfolio — Full-Stack To-Do App on AWS EKS"
+    />
+
+    <!--
+      Apple mobile web app manifest for PWA support.
+      logo192.png is the icon shown when adding to home screen on iOS.
+    -->
+    <link rel="apple-touch-icon" href="%PUBLIC_URL%/logo192.png" />
+
+    <!--
+      manifest.json: Web App Manifest for Progressive Web App (PWA) features.
+      Enables "Add to Home Screen" on Android devices.
+    -->
+    <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
+
+    <!--
+      IMPORTANT: Do NOT add external script/link tags here without careful
+      consideration. Every CDN dependency is a security risk (supply chain attack).
+      All dependencies should come through npm and be bundled by webpack.
+    -->
+
+    <title>Three-Tier Tasks App</title>
+  </head>
+  <body>
+    <!--
+      noscript: Shown only if the user has JavaScript disabled.
+      A React SPA requires JavaScript — there's no server-side rendering here.
+      In K8s with a properly configured reverse proxy, JS will always be enabled.
+    -->
+    <noscript>
+      You need to enable JavaScript to run this application.
+    </noscript>
+
+    <!--
+      THE MOUNT POINT:
+      This is where React renders the entire application.
+      ReactDOM.render(<App />, document.getElementById('root')) in index.js
+      replaces this div's content with the full React component tree.
+      The div starts empty — React fills it after the JS bundle loads.
+    -->
+    <div id="root"></div>
+
+    <!--
+      NOTE: <script> tags are automatically injected here by webpack during build.
+      You do NOT need to manually add them.
+    -->
+  </body>
+</html>

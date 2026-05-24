@@ -1,0 +1,46 @@
+/*
+ * App.css — Component Styles for the To-Do Application
+ *
+ * NOTES FOR DEVOPS/K8S:
+ * ---------------------
+ * This CSS file is imported in App.js and bundled by webpack during `npm run build`.
+ * The output is a minified CSS file in build/static/css/ that Nginx serves.
+ * There is NO runtime CSS processing — all styles are static after build.
+ *
+ * WHAT THESE STYLES DO:
+ * ---------------------
+ * .flex      → Flexbox utility class for centering and aligning content
+ * .App       → Full-viewport container (100vw x 100vh)
+ * .container → White card with max-width for the to-do list
+ * .heading   → Bold title at the top of the card
+ */
+
+/* Flexbox utility — used throughout the component for layout */
+.flex {
+  display: flex;
+  align-items: center;
+}
+
+/* Root app container — takes full viewport height and centers content */
+.App {
+  width: 100vw;       /* 100% of viewport width */
+  height: 100vh;      /* 100% of viewport height */
+  background-color: #fafafa;
+  justify-content: center;  /* horizontal centering */
+}
+
+/* Material UI Paper card styling override */
+.container {
+  width: 600px;       /* Fixed width — consider % for responsive design */
+  padding: 20px;
+  margin: auto;
+}
+
+/* TO-DO heading at top of card */
+.heading {
+  font-size: 2rem;
+  font-weight: bold;
+  text-align: center;
+  color: #3f51b5;     /* Material UI primary blue */
+  padding: 10px 0;
+}

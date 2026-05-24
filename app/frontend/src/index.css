@@ -1,0 +1,41 @@
+/*
+ * index.css — Global Base Styles
+ *
+ * These styles apply to ALL elements in the application (global scope).
+ * Imported in index.js — the first CSS processed when the app loads.
+ *
+ * WHY SEPARATE index.css FROM App.css?
+ * -------------------------------------
+ * index.css: Browser resets + body/html global defaults (applies everywhere)
+ * App.css:   Component-specific styles (only relevant to the To-Do card)
+ *
+ * In a production app, you'd typically use:
+ * - A CSS reset (normalize.css) instead of just margin/padding: 0
+ * - CSS custom properties (variables) for colors and spacing
+ * - CSS Modules or styled-components to avoid class name collisions
+ */
+
+/* Box-sizing reset: ensures padding and border are included in element width
+   This is a global best practice for predictable layout behavior */
+* {
+  box-sizing: border-box;
+}
+
+/* Remove default browser margin/padding from body and html */
+body {
+  margin: 0;
+  padding: 0;
+  /* System font stack — fast-loading, no external font request */
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen",
+    "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue",
+    sans-serif;
+  /* Subpixel antialiasing for smoother text on macOS/iOS */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Monospace font for any <code> elements */
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, "Courier New",
+    monospace;
+}

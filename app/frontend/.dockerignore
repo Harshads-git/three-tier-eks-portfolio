@@ -1,0 +1,55 @@
+# Frontend .dockerignore
+# ─────────────────────────────────────────────────────────────────────────────
+# Files listed here are EXCLUDED from the Docker build context.
+# Docker build context = files sent to the Docker daemon when you run `docker build`.
+#
+# WHY THIS MATTERS:
+# -----------------
+# Without .dockerignore, Docker sends your ENTIRE project directory to the daemon,
+# including node_modules (500MB+), build artifacts, and local .env files.
+# This makes builds slow and can accidentally include secrets in the image.
+#
+# RULE OF THUMB: Exclude anything that:
+#   1. The Dockerfile re-creates (node_modules — npm ci will install them)
+#   2. Is environment-specific (*.env files — use K8s ConfigMaps instead)
+#   3. Is a build artifact (build/ — the Dockerfile runs npm run build itself)
+#   4. Is only for local development (*.log, .DS_Store)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Dependencies — Docker runs npm ci inside the container, so these are rebuilt
+node_modules/
+
+# Local build output — Docker runs npm run build inside the Dockerfile
+build/
+
+# Environment files — NEVER copy into Docker image
+# Use K8s ConfigMaps or docker build --build-arg for env vars
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Git metadata — not needed in the image
+.git/
+.gitignore
+
+# Development logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS-generated files
+.DS_Store
+Thumbs.db
+
+# Editor config
+.vscode/
+.idea/
+
+# Test coverage reports — not needed in production image
+coverage/
+
+# Storybook files (if added later)
+.storybook/
+storybook-static/
