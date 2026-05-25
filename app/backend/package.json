@@ -1,0 +1,40 @@
+{
+  "name": "three-tier-backend",
+  "version": "1.0.0",
+  "description": "Node.js/Express REST API backend for the Three-Tier EKS Portfolio project",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "test": "jest --coverage",
+    "lint": "eslint ."
+  },
+  "keywords": [
+    "nodejs",
+    "express",
+    "mongodb",
+    "mongoose",
+    "rest-api",
+    "kubernetes",
+    "eks"
+  ],
+  "author": "Harshads-git",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "mongoose": "^7.3.1"
+  },
+  "devDependencies": {
+    "jest": "^29.5.0",
+    "nodemon": "^3.0.1",
+    "supertest": "^6.3.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "coverageDirectory": "coverage"
+  }
+}

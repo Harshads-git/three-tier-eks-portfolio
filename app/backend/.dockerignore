@@ -1,0 +1,55 @@
+# Backend .dockerignore
+# ─────────────────────────────────────────────────────────────────────────────
+# Excludes files from the Docker build context sent to the Docker daemon.
+# Without this, Docker sends ALL files including node_modules (100MB+).
+#
+# Unlike the frontend, the backend DOES run Node.js at runtime.
+# The Dockerfile runs `npm ci` inside the container to install dependencies
+# from scratch — so we exclude the local node_modules entirely.
+#
+# Rule: Exclude anything not needed for `npm ci` + `node index.js`
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Dependencies — Dockerfile runs npm ci to install these fresh inside container
+node_modules/
+
+# Environment files — Use K8s Secrets and ConfigMaps instead
+.env
+.env.local
+.env.*
+!.env.example
+
+# Git metadata — not needed inside the image
+.git/
+.gitignore
+
+# Development tools (not needed in production image)
+.eslintrc*
+.prettierrc*
+nodemon.json
+jest.config.*
+
+# Test files and coverage — production image should not contain tests
+coverage/
+__tests__/
+*.test.js
+*.spec.js
+
+# Development logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# OS-generated files
+.DS_Store
+Thumbs.db
+
+# Editor config
+.vscode/
+.idea/
+
+# Docker files (don't copy Dockerfile into image context)
+Dockerfile
+.dockerignore
+docker-compose*
