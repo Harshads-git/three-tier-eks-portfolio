@@ -1,0 +1,271 @@
+# REST API Contract — Backend Task API
+
+## Overview
+
+The backend exposes a RESTful JSON API at `/api/tasks`. All request bodies and response bodies use `Content-Type: application/json`. The API is consumed exclusively by the React frontend via `axios` in `taskServices.js`.
+
+**Base URL:**
+- Local dev: `http://localhost:5000`
+- Docker Compose: `http://backend:5000`
+- Kubernetes (EKS): Accessed via ALB at `http://<ALB-DNS>/api` (path-based routing)
+
+---
+
+## Endpoint Reference
+
+### 1. Create Task
+
+| Property | Value |
+|---|---|
+| **Method** | `POST` |
+| **Path** | `/api/tasks` |
+| **Auth** | None (open — auth to be added in production) |
+| **Content-Type** | `application/json` |
+
+**Request Body:**
+```json
+{
+  "task": "Deploy EKS cluster with Terraform"
+}
+```
+
+| Field | Type | Required | Validation |
+|---|---|---|---|
+| `task` | string | ✅ Yes | min: 1 char, max: 500 chars |
+
+**Success Response — `201 Created`:**
+```json
+{
+  "_id":       "64a3f1b2c0e789123456abcd",
+  "task":      "Deploy EKS cluster with Terraform",
+  "completed": false,
+  "createdAt": "2026-05-25T14:00:00.000Z",
+  "updatedAt": "2026-05-25T14:00:00.000Z"
+}
+```
+
+**Error Responses:**
+| Status | Condition | Body |
+|---|---|---|
+| `400` | Missing or empty `task` field | `{ "message": "Task description is required" }` |
+| `500` | MongoDB write failure | `{ "message": "Failed to create task", "error": "..." }` |
+
+---
+
+### 2. Get All Tasks
+
+| Property | Value |
+|---|---|
+| **Method** | `GET` |
+| **Path** | `/api/tasks` |
+| **Auth** | None |
+| **Request Body** | None |
+
+**Success Response — `200 OK`:**
+```json
+[
+  {
+    "_id":       "64a3f1b2c0e789123456abcd",
+    "task":      "Deploy EKS cluster with Terraform",
+    "completed": true,
+    "createdAt": "2026-05-25T14:00:00.000Z",
+    "updatedAt": "2026-05-25T15:00:00.000Z"
+  },
+  {
+    "_id":       "64a3f1b2c0e789123456efgh",
+    "task":      "Set up Prometheus monitoring",
+    "completed": false,
+    "createdAt": "2026-05-25T16:00:00.000Z",
+    "updatedAt": "2026-05-25T16:00:00.000Z"
+  }
+]
+```
+
+**Empty Database:**
+```json
+[]
+```
+> Returns `200 OK` with empty array (NOT `404`). An empty list is a valid state.
+
+**Error Responses:**
+| Status | Condition | Body |
+|---|---|---|
+| `500` | MongoDB read failure | `{ "message": "Failed to fetch tasks", "error": "..." }` |
+
+---
+
+### 3. Update Task
+
+| Property | Value |
+|---|---|
+| **Method** | `PUT` |
+| **Path** | `/api/tasks/:id` |
+| **Auth** | None |
+| **Content-Type** | `application/json` |
+
+**URL Parameter:**
+| Param | Type | Description |
+|---|---|---|
+| `:id` | MongoDB ObjectId (24-char hex) | The `_id` of the task to update |
+
+**Request Body:**
+```json
+{
+  "task":      "Deploy EKS cluster with Terraform",
+  "completed": true
+}
+```
+
+**Success Response — `200 OK`:**
+```json
+{
+  "_id":       "64a3f1b2c0e789123456abcd",
+  "task":      "Deploy EKS cluster with Terraform",
+  "completed": true,
+  "createdAt": "2026-05-25T14:00:00.000Z",
+  "updatedAt": "2026-05-25T15:00:00.000Z"
+}
+```
+
+**Error Responses:**
+| Status | Condition | Body |
+|---|---|---|
+| `400` | `:id` is not a valid MongoDB ObjectId | `{ "message": "Invalid task ID format" }` |
+| `404` | No task found with given `:id` | `{ "message": "Task not found" }` |
+| `500` | MongoDB update failure | `{ "message": "Failed to update task", "error": "..." }` |
+
+---
+
+### 4. Delete Task
+
+| Property | Value |
+|---|---|
+| **Method** | `DELETE` |
+| **Path** | `/api/tasks/:id` |
+| **Auth** | None |
+| **Request Body** | None |
+
+**URL Parameter:**
+| Param | Type | Description |
+|---|---|---|
+| `:id` | MongoDB ObjectId | The `_id` of the task to permanently delete |
+
+**Success Response — `200 OK`:**
+```json
+{
+  "message": "Task deleted successfully"
+}
+```
+
+**Error Responses:**
+| Status | Condition | Body |
+|---|---|---|
+| `400` | `:id` is not a valid MongoDB ObjectId | `{ "message": "Invalid task ID format" }` |
+| `404` | No task found with given `:id` | `{ "message": "Task not found" }` |
+| `500` | MongoDB delete failure | `{ "message": "Failed to delete task", "error": "..." }` |
+
+---
+
+### 5. Health Check
+
+| Property | Value |
+|---|---|
+| **Method** | `GET` |
+| **Path** | `/health` |
+| **Purpose** | Kubernetes liveness and readiness probes |
+
+**Success Response — `200 OK`:**
+```json
+{
+  "status": "ok",
+  "uptime": 12345.678,
+  "timestamp": "2026-05-25T14:00:00.000Z",
+  "mongodb": "connected"
+}
+```
+
+**Unhealthy Response — `503 Service Unavailable`:**
+```json
+{
+  "status": "error",
+  "mongodb": "disconnected"
+}
+```
+
+> **K8s Probe Usage:**
+> - `livenessProbe`: If `/health` returns non-2xx, K8s kills and restarts the pod
+> - `readinessProbe`: If `/health` returns non-2xx, K8s removes the pod from the Service's endpoint list (stops sending traffic)
+
+---
+
+## Data Model
+
+### Task Document (MongoDB)
+
+```
+Collection: tasks (in database: tasksdb)
+```
+
+| Field | Type | Description | Source |
+|---|---|---|---|
+| `_id` | ObjectId | Unique identifier (24-char hex) | Auto-generated by MongoDB |
+| `task` | String | Task description (1-500 chars, trimmed) | Client-provided |
+| `completed` | Boolean | Task completion status | Default: `false` |
+| `createdAt` | Date | Creation timestamp (ISO 8601) | Auto by Mongoose `timestamps: true` |
+| `updatedAt` | Date | Last update timestamp (ISO 8601) | Auto by Mongoose `timestamps: true` |
+
+**Example MongoDB Document:**
+```json
+{
+  "_id":       { "$oid": "64a3f1b2c0e789123456abcd" },
+  "task":      "Configure IRSA for Load Balancer Controller",
+  "completed": false,
+  "createdAt": { "$date": "2026-05-25T14:00:00.000Z" },
+  "updatedAt": { "$date": "2026-05-25T14:00:00.000Z" }
+}
+```
+
+---
+
+## Request/Response Flow (Complete)
+
+```
+Frontend (React/Axios)             Backend (Express/Mongoose)          Database (MongoDB)
+─────────────────────────────────────────────────────────────────────────────────────
+POST /api/tasks                →   express.json() parses body
+{ "task": "My task" }             cors() adds headers
+                                   taskRouter.post("/") called
+                                   new Task(req.body)
+                                   Mongoose validates schema
+                                                                 →  INSERT into tasks collection
+                                                                 ←  Returns saved document
+                               ←   res.status(201).json(task)
+← { _id, task, completed, ... }
+```
+
+---
+
+## Error Handling Strategy
+
+| Error Type | HTTP Status | How It's Handled |
+|---|---|---|
+| Missing required field | 400 | Mongoose `ValidationError` caught, message forwarded |
+| Invalid MongoDB ID | 400 | Mongoose `CastError` caught, clear message returned |
+| Document not found | 404 | `findByIdAndUpdate/Delete` returns null, explicit 404 |
+| MongoDB unavailable | 500 | Caught in try/catch, generic error message (no internals exposed) |
+| Unknown route | 404 | Catch-all handler in `index.js` |
+| Unhandled error | 500 | Global error middleware in `index.js` |
+
+---
+
+## Future API Improvements (Production Roadmap)
+
+| Improvement | Why |
+|---|---|
+| **Authentication (JWT)** | Currently open — anyone can create/delete tasks |
+| **Pagination** | `GET /api/tasks` returns all — will break with 10,000+ tasks |
+| **Filtering** | `GET /api/tasks?completed=false` for incomplete tasks only |
+| **Rate Limiting** | Prevent API abuse (express-rate-limit) |
+| **Input Sanitization** | Protect against NoSQL injection |
+| **Soft Delete** | Add `deletedAt` field instead of permanent delete |
+| **OpenAPI/Swagger Spec** | Auto-generate API docs from code |
