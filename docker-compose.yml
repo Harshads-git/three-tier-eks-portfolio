@@ -1,0 +1,214 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# docker-compose.yml — Local Three-Tier Development Environment
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# WHAT THIS FILE DOES:
+# --------------------
+# Defines the complete local development environment for all 3 application tiers.
+# One command to run everything: `make up` (or `docker compose up -d`)
+#
+# SERVICES:
+#   mongo    → MongoDB 6.0 database (Tier 3 — Data)
+#   backend  → Node.js/Express REST API (Tier 2 — Logic)
+#   frontend → React SPA via Nginx (Tier 1 — Presentation)
+#
+# NETWORK TOPOLOGY (mirrors Kubernetes ClusterIP services):
+#
+#   Host Machine
+#     localhost:3000  ──── frontend:80      (React SPA)
+#     localhost:5000  ──── backend:5000     (API direct access)
+#     localhost:27017 ──── mongo:27017      (DB direct access for debugging)
+#
+#   Docker Internal Network (three-tier-network):
+#     frontend → backend  via http://backend:5000  (Docker DNS)
+#     backend  → mongo    via mongodb://mongo:27017 (Docker DNS)
+#     mongo    ← host     via localhost:27017       (debugging only)
+#
+# KEY PARALLEL WITH KUBERNETES:
+# -------------------------------
+#   Docker Compose service name  ↔  Kubernetes Service name
+#   Docker network (bridge)      ↔  Kubernetes ClusterIP Service
+#   Named volume (mongo-data)    ↔  PersistentVolumeClaim (EBS gp2)
+#   env_file / environment       ↔  ConfigMap + Secret
+#   depends_on + healthcheck     ↔  initContainers + readinessProbe
+#
+# ─────────────────────────────────────────────────────────────────────────────
+
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SERVICES
+# ─────────────────────────────────────────────────────────────────────────────
+services:
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # TIER 3: DATABASE — MongoDB
+  # ───────────────────────────────────────────────────────────────────────────
+  mongo:
+    # Official MongoDB 6.0 image from Docker Hub.
+    # We pin the minor version (6.0) to avoid surprise upgrades.
+    # In production (K8s), we use the same tag in the StatefulSet manifest.
+    image: mongo:6.0
+
+    # Container name — makes `docker exec -it mongo mongosh` convenient
+    container_name: mongo
+
+    # Always restart the container if it exits unexpectedly.
+    # Equivalent to Kubernetes restartPolicy: Always
+    restart: unless-stopped
+
+    # Expose MongoDB port to the HOST machine for debugging.
+    # Format: "HOST_PORT:CONTAINER_PORT"
+    # In K8s, MongoDB is NEVER exposed externally — ClusterIP only.
+    # Here we expose it locally so you can connect with MongoDB Compass.
+    ports:
+      - "27017:27017"
+
+    # MongoDB credentials — set via environment variables.
+    # These are injected as MONGO_INITDB_ROOT_USERNAME and MONGO_INITDB_ROOT_PASSWORD
+    # which the official MongoDB image reads on first startup to create the root user.
+    #
+    # In K8s: These come from a Kubernetes Secret (k8s/mongo/secret.yaml)
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: password123
+      MONGO_INITDB_DATABASE: tasksdb
+
+    # Named volume — persists MongoDB data across container restarts.
+    # Without this, all tasks are LOST every time `docker compose down` runs.
+    #
+    # K8s equivalent: PersistentVolumeClaim backed by EBS gp2 StorageClass
+    # /data/db is where MongoDB stores all its collection data files.
+    volumes:
+      - mongo-data:/data/db
+
+    # Health check — verifies MongoDB is ready to accept connections.
+    # Docker waits for this to pass before marking the service as "healthy".
+    # `backend` service has depends_on with condition: service_healthy,
+    # so it won't start until MongoDB is accepting connections.
+    #
+    # K8s equivalent: readinessProbe for the MongoDB StatefulSet pod
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s      # Check every 10 seconds
+      timeout: 5s        # Fail if no response within 5 seconds
+      retries: 5         # Mark unhealthy after 5 consecutive failures
+      start_period: 20s  # Give MongoDB 20s to start before health checks begin
+
+    # Attach to our custom bridge network
+    networks:
+      - three-tier-network
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # TIER 2: LOGIC — Node.js/Express Backend
+  # ───────────────────────────────────────────────────────────────────────────
+  backend:
+    # We build from the local Dockerfile instead of pulling a pre-built image.
+    # In CI/CD (Day 24), this image is built and pushed to Amazon ECR.
+    build:
+      context: ./app/backend      # Dockerfile directory
+      dockerfile: Dockerfile      # Added in Day 6
+
+    container_name: backend
+    restart: unless-stopped
+
+    # Expose backend port to the host for direct API testing.
+    # Lets you test: curl http://localhost:5000/health
+    ports:
+      - "5000:5000"
+
+    # Environment variables for the backend.
+    # Uses Docker service name "mongo" as the MongoDB hostname.
+    # Docker's internal DNS resolves "mongo" to the mongo container's IP.
+    #
+    # K8s equivalent:
+    #   - PORT, NODE_ENV → ConfigMap (k8s/backend/configmap.yaml)
+    #   - MONGO_URI      → Secret   (k8s/mongo/secret.yaml)
+    environment:
+      PORT: 5000
+      NODE_ENV: development
+      # "mongo" = Docker service name (resolved by Docker DNS to container IP)
+      # This is the docker-compose equivalent of K8s ClusterIP service DNS:
+      # mongo-service.three-tier.svc.cluster.local:27017
+      MONGO_URI: mongodb://admin:password123@mongo:27017/tasksdb?authSource=admin
+
+    # depends_on with service_healthy ensures the backend doesn't start
+    # until MongoDB is ACTUALLY ready (not just its container started).
+    # Without this, the backend starts before MongoDB is ready → connection error.
+    #
+    # K8s equivalent: initContainer that waits for MongoDB to be reachable,
+    # OR readinessProbe on the backend that returns 503 until DB is ready.
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+    # Attach to our custom bridge network
+    networks:
+      - three-tier-network
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # TIER 1: PRESENTATION — React Frontend (Nginx)
+  # ───────────────────────────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./app/frontend     # Dockerfile directory
+      dockerfile: Dockerfile      # Added in Day 6
+      # REACT_APP_BACKEND_URL is a BUILD-TIME argument (baked into the JS bundle).
+      # It tells the frontend where to find the backend API.
+      # "backend" = Docker service name, resolved by Docker DNS.
+      # Port 5000 = backend container's internal port.
+      #
+      # K8s equivalent: In EKS, the URL would be the ALB DNS name with /api path
+      # and this is passed as --build-arg in the CI/CD pipeline (Day 24).
+      args:
+        REACT_APP_BACKEND_URL: http://localhost:5000/api/tasks
+
+    container_name: frontend
+    restart: unless-stopped
+
+    # Nginx serves the React build on port 80 inside the container.
+    # We expose it on host port 3000 (matching the standard CRA dev port).
+    ports:
+      - "3000:80"
+
+    # Frontend depends on backend being healthy.
+    # In K8s, frontend pods are independent — they don't depend on backend pods.
+    # K8s handles this at the Service level (retries, circuit breaking).
+    depends_on:
+      - backend
+
+    networks:
+      - three-tier-network
+
+# ─────────────────────────────────────────────────────────────────────────────
+# NETWORKS
+# ─────────────────────────────────────────────────────────────────────────────
+networks:
+  three-tier-network:
+    # Bridge driver creates an isolated virtual network for our containers.
+    # All services on this network can communicate using their service name as hostname.
+    # Containers NOT on this network cannot reach them (isolation).
+    #
+    # K8s equivalent: Kubernetes flat network where pods communicate by
+    # Service name (ClusterIP). Only pods in the same namespace (by default)
+    # can reach each other — controlled by NetworkPolicy (added in Day 22).
+    driver: bridge
+    name: three-tier-network
+
+# ─────────────────────────────────────────────────────────────────────────────
+# VOLUMES
+# ─────────────────────────────────────────────────────────────────────────────
+volumes:
+  mongo-data:
+    # Named Docker volume managed by Docker daemon.
+    # Data persists across `docker compose restart` and `docker compose stop`.
+    # Data is DELETED only when `docker compose down -v` is run.
+    #
+    # To inspect the volume:
+    #   docker volume inspect three-tier-eks-portfolio_mongo-data
+    #
+    # K8s equivalent: PersistentVolumeClaim (PVC)
+    #   storageClassName: gp2
+    #   accessModes: [ReadWriteOnce]
+    #   resources.requests.storage: 5Gi
+    driver: local
