@@ -22,9 +22,7 @@ dist/
 .env.production.local
 *.env
 !.env.example
-!.env.docker
-# Docker Compose local overrides (machine-specific, not committed)
-docker-compose.override.yml
+!.env.docker     # .env.docker contains ONLY local dev placeholders — safe to commit
 
 # ============================================================
 # Terraform
