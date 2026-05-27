@@ -1,0 +1,156 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/mongo/service.yaml — MongoDB Kubernetes Services
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# WHY TWO SERVICES FOR MONGODB?
+# ─────────────────────────────────────────────────────────────────────────────
+# StatefulSets typically need TWO services:
+#
+# 1. HEADLESS SERVICE (clusterIP: None) — mongo-headless
+#    Purpose: Gives each pod a stable, individual DNS name.
+#    Used by: StatefulSet spec.serviceName field, MongoDB replica set members
+#    DNS pattern:
+#      mongo-0.mongo-headless.three-tier.svc.cluster.local → pod mongo-0's IP
+#      mongo-1.mongo-headless.three-tier.svc.cluster.local → pod mongo-1's IP
+#    No load balancing — each DNS name resolves to EXACTLY one pod.
+#    Required for MongoDB replica set configuration (members address each other by hostname).
+#
+# 2. REGULAR CLUSTERIP SERVICE — mongo-service
+#    Purpose: Single stable DNS name for the backend to connect to MongoDB.
+#    Used by: backend pod MONGO_URI environment variable
+#    DNS: mongo-service.three-tier.svc.cluster.local:27017
+#    Load balances across all MongoDB pods (for a replica set, this routes to any member).
+#
+# In this single-replica setup, only mongo-service is strictly needed for the backend.
+# mongo-headless is included because:
+#   a) StatefulSet requires a governing service (serviceName: mongo-headless)
+#   b) Prepares the architecture for future 3-replica MongoDB setup
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# KUBERNETES SERVICE TYPES — REFERENCE
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# ClusterIP (default):
+#   - Accessible only WITHIN the cluster (no external access)
+#   - Gets a virtual IP (VIP) from the cluster's service CIDR
+#   - kube-proxy routes traffic to pods via iptables rules
+#   - Perfect for: inter-service communication (backend → MongoDB)
+#
+# NodePort:
+#   - Exposes the service on a static port on EVERY node's IP
+#   - Accessible from outside the cluster: <NodeIP>:<NodePort>
+#   - Port range: 30000-32767
+#   - NOT recommended for production (exposes node IPs, no TLS termination)
+#
+# LoadBalancer:
+#   - Provisions a cloud load balancer (AWS NLB/CLB)
+#   - Gets a public DNS name/IP
+#   - Expensive: one LB per service
+#   - Better alternative: Use ALB Ingress (routes multiple services behind one LB)
+#
+# ExternalName:
+#   - Maps a service to an external DNS name
+#   - Useful for: pointing to external databases (e.g., MongoDB Atlas)
+#
+# Headless (clusterIP: None):
+#   - No virtual IP, no load balancing
+#   - DNS returns the Pod IPs directly
+#   - Required for StatefulSets
+# ─────────────────────────────────────────────────────────────────────────────
+
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# SERVICE 1: Headless Service (for StatefulSet pod DNS + replica set)
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+
+metadata:
+  name: mongo-headless
+  namespace: three-tier
+
+  labels:
+    app: mongodb
+    app.kubernetes.io/name: mongodb
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: three-tier-portfolio
+    service-type: headless
+
+  annotations:
+    description: >
+      Headless service for MongoDB StatefulSet. Provides stable DNS names
+      per pod (mongo-0.mongo-headless.three-tier.svc.cluster.local).
+      Required by StatefulSet spec.serviceName. Used for MongoDB replica set
+      member-to-member communication in multi-replica deployments.
+
+spec:
+  # clusterIP: None = headless service.
+  # No virtual IP is assigned. DNS returns individual pod IPs directly.
+  # This is what gives StatefulSet pods their individual stable DNS names.
+  clusterIP: None
+
+  # publishNotReadyAddresses: true
+  # Include pods in DNS even if their readiness probe is failing.
+  # Important during MongoDB startup — pods need to discover each other
+  # before they become "ready" (for replica set initialization).
+  publishNotReadyAddresses: true
+
+  # selector: Routes to pods with this label.
+  # Must match StatefulSet pod template labels.
+  selector:
+    app: mongodb
+
+  ports:
+    - name: mongodb
+      port: 27017
+      targetPort: mongodb    # References containerPort name in StatefulSet
+      protocol: TCP
+
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# SERVICE 2: ClusterIP Service (for backend → MongoDB communication)
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+
+metadata:
+  name: mongo-service
+  namespace: three-tier
+
+  labels:
+    app: mongodb
+    app.kubernetes.io/name: mongodb
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: three-tier-portfolio
+    service-type: cluster-ip
+
+  annotations:
+    description: >
+      ClusterIP service for backend-to-MongoDB communication.
+      Backend pods connect using MONGO_URI with host: mongo-service.
+      Full DNS: mongo-service.three-tier.svc.cluster.local:27017
+      This service provides load balancing across all MongoDB pods
+      (useful when replicas=3 for read distribution).
+
+spec:
+  # type: ClusterIP is the default — makes service accessible only within the cluster.
+  # MongoDB must NEVER be exposed outside the cluster (no NodePort or LoadBalancer).
+  # This is a core security principle of three-tier architecture.
+  type: ClusterIP
+
+  # selector: Routes traffic to pods with app=mongodb label.
+  # In a replica set, this load balances across ALL MongoDB members.
+  # For single replica (replicas: 1 in StatefulSet), routes to mongo-0 only.
+  selector:
+    app: mongodb
+
+  ports:
+    - name: mongodb
+      port: 27017        # Port the service listens on (from other pods' perspective)
+      targetPort: mongodb # Port on the pod container (containerPort name in StatefulSet)
+      protocol: TCP
+
+  # sessionAffinity: None = default, round-robin load balancing across pods.
+  # For MongoDB replica sets, use the MongoDB driver's built-in read preferences
+  # (readPreference: primary/secondary) rather than K8s session affinity.
+  sessionAffinity: None
