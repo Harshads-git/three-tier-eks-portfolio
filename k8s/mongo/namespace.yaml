@@ -1,0 +1,65 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/mongo/namespace.yaml — Kubernetes Namespace
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# WHAT IS A NAMESPACE?
+# --------------------
+# A Namespace is a logical partition inside a Kubernetes cluster.
+# Think of it as a "virtual cluster" within the real cluster.
+#
+# Without namespaces, all resources (pods, services, secrets) live in "default".
+# This is fine for experimentation but breaks down in real workloads:
+#
+# WHY WE USE A DEDICATED NAMESPACE ("three-tier"):
+# ------------------------------------------------
+# 1. ISOLATION: Resources in one namespace cannot accidentally affect another.
+#    A `kubectl delete all --all` in "three-tier" won't touch "monitoring".
+#
+# 2. RBAC SCOPE: Role-Based Access Control can be applied per-namespace.
+#    A developer can have full access to "three-tier" but read-only in "kube-system".
+#
+# 3. NETWORK POLICIES: Policies apply per-namespace boundary.
+#    We can say "only pods in three-tier namespace can talk to MongoDB".
+#
+# 4. RESOURCE QUOTAS: Limit total CPU/memory consumption per namespace.
+#    Prevents one team's workload from starving another.
+#
+# 5. ORGANIZATIONAL CLARITY: kubectl commands scoped to a namespace:
+#    kubectl get pods -n three-tier   (only shows our pods)
+#    kubectl get pods -n monitoring   (only shows Prometheus pods)
+#
+# NAMING CONVENTION:
+# ------------------
+# Namespace names must be:
+#   - Lowercase alphanumeric or hyphens
+#   - Must start and end with alphanumeric
+#   - Max 63 characters
+#
+# APPLY ORDER:
+# ------------
+# Apply namespace FIRST before any other manifest:
+#   kubectl apply -f k8s/mongo/namespace.yaml
+#   kubectl apply -f k8s/mongo/secret.yaml
+#   ... etc.
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: v1
+kind: Namespace
+
+metadata:
+  name: three-tier
+
+  labels:
+    # Labels are key-value pairs attached to resources.
+    # Used for: filtering, selecting, NetworkPolicy targeting.
+    # kubectl get namespaces -l app.kubernetes.io/part-of=three-tier-portfolio
+    app.kubernetes.io/part-of: three-tier-portfolio
+    app.kubernetes.io/managed-by: kubectl
+    environment: production
+
+  annotations:
+    # Annotations store non-identifying metadata (not used for selection).
+    # Useful for tooling, CI/CD tracking, documentation links.
+    description: "Three-Tier EKS Portfolio — Namespace for all application resources"
+    owner: "Harshads-git"
+    project-url: "https://github.com/Harshads-git/three-tier-eks-portfolio"
