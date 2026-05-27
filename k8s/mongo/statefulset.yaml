@@ -1,0 +1,309 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/mongo/statefulset.yaml — MongoDB StatefulSet
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# WHY A STATEFULSET (NOT A DEPLOYMENT)?
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Deployment:
+#   - Pods are STATELESS and interchangeable
+#   - Pods get random names: backend-7d9f4b-xkzp2, backend-7d9f4b-ab12c
+#   - All pods share the same PVC (or use ephemeral storage)
+#   - Pods can be scaled up/down in any order
+#   - Good for: frontend, backend, API services
+#
+# StatefulSet:
+#   - Pods have STABLE, PREDICTABLE names: mongo-0, mongo-1, mongo-2
+#   - Each pod gets its OWN PersistentVolumeClaim (individual storage)
+#   - Pods are created/deleted in ORDER (0, 1, 2 ... not random)
+#   - Pods get stable network identities via a Headless Service
+#   - Good for: MongoDB, PostgreSQL, Kafka, Elasticsearch, ZooKeeper
+#
+# FOR MONGODB SPECIFICALLY:
+#   - MongoDB requires stable hostnames for replica set member configuration
+#   - mongo-0 is always the primary (or first member to start)
+#   - Each replica needs its OWN data directory (its own PVC)
+#   - Scaling from 1 → 3 replicas: mongo-1 and mongo-2 join as secondaries
+#   - If mongo-0 pod is deleted, K8s creates a new mongo-0 (same name, same PVC)
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# PERSISTENT VOLUME CLAIM (PVC) EXPLAINED
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# PersistentVolumeClaim = MongoDB's way of requesting disk storage from K8s.
+#
+# Flow in EKS:
+#   StatefulSet creates PVC "mongo-data-mongo-0"
+#     → K8s StorageClass "gp2" triggers AWS EBS provisioner
+#       → AWS creates an EBS volume (gp2, 5Gi) in the same AZ as the node
+#         → EBS volume is attached to the EC2 node
+#           → Mounted into the pod at /data/db
+#             → MongoDB writes data to /data/db
+#
+# DATA SURVIVAL:
+#   Pod deleted    → PVC survives → EBS volume detaches, waits → new pod attaches same EBS
+#   Node terminated → PVC survives → EBS volume reattaches to new node
+#   StatefulSet scaled to 0 → PVC survives (data preserved)
+#   `kubectl delete pvc` → EBS volume deleted ⚠️ DATA LOSS
+#
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: apps/v1
+kind: StatefulSet
+
+metadata:
+  name: mongo
+  namespace: three-tier
+
+  labels:
+    app: mongodb
+    app.kubernetes.io/name: mongodb
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: three-tier-portfolio
+    app.kubernetes.io/version: "6.0"
+
+spec:
+  # ─────────────────────────────────────────────────────────────────────────
+  # StatefulSet Core Settings
+  # ─────────────────────────────────────────────────────────────────────────
+
+  # serviceName: MUST reference the Headless Service (clusterIP: None in service.yaml).
+  # This gives each pod a stable DNS name:
+  #   mongo-0.mongo-headless.three-tier.svc.cluster.local
+  #   mongo-1.mongo-headless.three-tier.svc.cluster.local
+  # The ClusterIP service (mongo-service) routes to ALL pods for general connections.
+  serviceName: mongo-headless
+
+  # replicas: 1 for simplicity in this portfolio.
+  # Production: Use 3 replicas for a proper MongoDB Replica Set.
+  # With 3 replicas: 1 primary (reads+writes) + 2 secondaries (reads, failover)
+  replicas: 1
+
+  # updateStrategy: How to roll out updates to the StatefulSet.
+  # RollingUpdate: Updates pods one at a time, starting from the highest ordinal.
+  #   mongo-2 updated → mongo-1 updated → mongo-0 updated
+  # partition: 0 means ALL pods are included in rolling update.
+  # partition: 1 means only mongo-1, mongo-2 are updated (canary deployments)
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      partition: 0
+
+  # selector: The StatefulSet uses this to find and manage its pods.
+  # MUST match spec.template.metadata.labels exactly.
+  selector:
+    matchLabels:
+      app: mongodb
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Pod Template
+  # ─────────────────────────────────────────────────────────────────────────
+  # This is the blueprint for each pod (mongo-0, mongo-1, etc.)
+  template:
+    metadata:
+      labels:
+        app: mongodb
+        app.kubernetes.io/name: mongodb
+        app.kubernetes.io/component: database
+        app.kubernetes.io/part-of: three-tier-portfolio
+
+    spec:
+      # ───────────────────────────────────────────────────────────────────
+      # SECURITY CONTEXT (Pod level)
+      # ───────────────────────────────────────────────────────────────────
+      # Runs the pod's processes with a non-root user for security.
+      # MongoDB official image runs as UID 999 (mongodb user).
+      securityContext:
+        # fsGroup: All volumes are mounted with this group ID.
+        # MongoDB needs write access to /data/db — group 999 grants this.
+        fsGroup: 999
+        # runAsNonRoot: Prevents accidental use of root UID.
+        runAsNonRoot: true
+        runAsUser: 999
+
+      # ───────────────────────────────────────────────────────────────────
+      # TERMINATION GRACE PERIOD
+      # ───────────────────────────────────────────────────────────────────
+      # Time K8s waits for MongoDB to shut down cleanly before force-killing.
+      # MongoDB needs time to:
+      #   1. Finish writing pending journal entries
+      #   2. Close open file handles
+      #   3. Release storage engine locks
+      # 60s is generous. Default (30s) is usually fine for single-node.
+      terminationGracePeriodSeconds: 60
+
+      containers:
+        - name: mongodb
+          image: mongo:6.0
+          # Always use a specific version tag — never 'latest'.
+          # 'latest' breaks reproducibility: the image changes silently.
+
+          # imagePullPolicy:
+          # IfNotPresent: Use cached image if it exists, pull only if missing.
+          # Always: Always pull (useful when image tag is mutable like 'latest' — avoid this!)
+          imagePullPolicy: IfNotPresent
+
+          # ─────────────────────────────────────────────────────────────
+          # CONTAINER PORTS
+          # ─────────────────────────────────────────────────────────────
+          # containerPort is for DOCUMENTATION only — it doesn't open any firewall.
+          # Actual port access is controlled by the Service and NetworkPolicy.
+          ports:
+            - name: mongodb
+              containerPort: 27017
+              protocol: TCP
+
+          # ─────────────────────────────────────────────────────────────
+          # ENVIRONMENT VARIABLES — Injected from Secret
+          # ─────────────────────────────────────────────────────────────
+          env:
+            # These env vars configure MongoDB's initial setup:
+            #   MONGO_INITDB_ROOT_USERNAME + PASSWORD → creates root user
+            #   MONGO_INITDB_DATABASE → creates initial database
+            # Only effective on FIRST startup (when /data/db is empty).
+            # After the first run, MongoDB ignores these (data already initialized).
+
+            - name: MONGO_INITDB_ROOT_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: mongo-secret       # Secret name in same namespace
+                  key: MONGO_ROOT_USERNAME
+
+            - name: MONGO_INITDB_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mongo-secret
+                  key: MONGO_ROOT_PASSWORD
+
+            - name: MONGO_INITDB_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: mongo-secret
+                  key: MONGO_DATABASE
+
+          # ─────────────────────────────────────────────────────────────
+          # RESOURCE REQUESTS AND LIMITS
+          # ─────────────────────────────────────────────────────────────
+          # requests: The minimum guaranteed resources for this container.
+          #   K8s scheduler uses this to find a node with enough capacity.
+          #   If no node has 256Mi memory free → pod stays Pending.
+          #
+          # limits: The maximum the container can use.
+          #   If memory > 512Mi → container is OOMKilled (restart).
+          #   If CPU > 500m → container is throttled (not killed).
+          #
+          # For production MongoDB:
+          #   Increase memory to at least 2Gi (MongoDB is memory-hungry for indexes/cache)
+          #   Set WiredTiger cache: --wiredTigerCacheSizeGB 1 (stay under limit)
+          resources:
+            requests:
+              memory: "256Mi"    # 256 mebibytes minimum
+              cpu: "250m"        # 250 millicores = 0.25 vCPU
+            limits:
+              memory: "512Mi"    # OOMKilled if exceeded
+              cpu: "500m"        # Throttled if exceeded
+
+          # ─────────────────────────────────────────────────────────────
+          # VOLUME MOUNT
+          # ─────────────────────────────────────────────────────────────
+          volumeMounts:
+            - name: mongo-data
+              # /data/db is MongoDB's default data directory.
+              # WiredTiger engine stores all data files here.
+              # This path MUST be mounted to a persistent volume — otherwise
+              # all data is lost when the pod restarts (ephemeral container storage).
+              mountPath: /data/db
+
+          # ─────────────────────────────────────────────────────────────
+          # LIVENESS PROBE
+          # ─────────────────────────────────────────────────────────────
+          # "Is MongoDB alive and accepting commands?"
+          # If this fails 3 times → kubelet kills and restarts the container.
+          #
+          # exec: runs a command INSIDE the container (no network needed).
+          # mongosh --eval "db.adminCommand('ping')" → returns { ok: 1 } if alive.
+          livenessProbe:
+            exec:
+              command:
+                - mongosh
+                - "--eval"
+                - "db.adminCommand('ping')"
+                - "--quiet"
+            initialDelaySeconds: 30   # Give MongoDB 30s to start before first probe
+            periodSeconds: 20          # Check every 20 seconds
+            timeoutSeconds: 10         # Fail if command takes > 10 seconds
+            failureThreshold: 3        # Kill container after 3 consecutive failures
+            successThreshold: 1        # Mark live after 1 success
+
+          # ─────────────────────────────────────────────────────────────
+          # READINESS PROBE
+          # ─────────────────────────────────────────────────────────────
+          # "Is MongoDB ready to accept connections from the backend?"
+          # If this fails → pod is removed from Service Endpoints (no traffic).
+          # Pod is NOT killed (liveness would handle that).
+          #
+          # During startup, MongoDB is 'live' (process running) but not yet 'ready'
+          # (still loading indexes, replaying journal). Readiness handles this gap.
+          readinessProbe:
+            exec:
+              command:
+                - mongosh
+                - "--eval"
+                - "db.adminCommand('ping')"
+                - "--quiet"
+            initialDelaySeconds: 10   # Start checking sooner than liveness
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+            successThreshold: 1
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # VOLUME CLAIM TEMPLATES
+  # ─────────────────────────────────────────────────────────────────────────
+  # This is what makes StatefulSet different from Deployment.
+  # For EACH pod (mongo-0, mongo-1, ...), K8s automatically creates a
+  # separate PVC using this template:
+  #   mongo-0 → PVC: mongo-data-mongo-0 (5Gi EBS volume)
+  #   mongo-1 → PVC: mongo-data-mongo-1 (5Gi EBS volume, separate!)
+  #   mongo-2 → PVC: mongo-data-mongo-2 (5Gi EBS volume, separate!)
+  #
+  # This ensures each replica stores its OWN copy of the data.
+  # (MongoDB replica set: each member has a full copy of all data)
+  #
+  # ⚠️  IMPORTANT: Deleting the StatefulSet does NOT delete the PVCs.
+  #     You must manually delete PVCs: kubectl delete pvc -n three-tier mongo-data-mongo-0
+  #     This is a SAFETY feature — prevents accidental data loss.
+  volumeClaimTemplates:
+    - metadata:
+        name: mongo-data
+
+        labels:
+          app: mongodb
+          app.kubernetes.io/component: database
+
+        annotations:
+          # Documents what this volume is for
+          description: "MongoDB WiredTiger data directory — persists all task documents"
+
+      spec:
+        # accessModes:
+        # ReadWriteOnce (RWO): Only ONE node can mount this volume at a time.
+        # This is correct for MongoDB — only the pod on one node accesses the data.
+        # (ReadWriteMany would require NFS/EFS — expensive and slower for databases)
+        accessModes:
+          - ReadWriteOnce
+
+        # storageClassName: "gp2" uses AWS EBS gp2 (General Purpose SSD).
+        # In EKS, gp2 is the default StorageClass.
+        # For production, consider gp3 (cheaper, faster, independently configurable IOPS):
+        #   storageClassName: gp3
+        # The EBS CSI Driver (added via Terraform on Day 13) enables dynamic provisioning.
+        storageClassName: gp2
+
+        resources:
+          requests:
+            # 5Gi = 5 Gibibytes (~5.37 GB) of EBS storage.
+            # For production with real data, start at 20Gi and monitor usage.
+            # Expanding EBS volumes in EKS is possible (edit PVC), but
+            # requires a StorageClass with allowVolumeExpansion: true.
+            storage: 5Gi
