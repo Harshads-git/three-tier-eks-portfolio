@@ -1,0 +1,297 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/backend/deployment.yaml — Backend Kubernetes Deployment
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# WHAT IS A DEPLOYMENT?
+# ─────────────────────────────────────────────────────────────────────────────
+# A Deployment is a K8s controller that manages a set of identical, stateless pods.
+# It ensures the desired number of replicas are always running and handles:
+#   - Rolling updates (zero-downtime upgrades)
+#   - Rollbacks (kubectl rollout undo)
+#   - Self-healing (replaces failed pods automatically)
+#   - Scaling (kubectl scale or HPA — added in Commit 3)
+#
+# RELATIONSHIP: Deployment → ReplicaSet → Pods
+#   Deployment defines the DESIRED state (2 replicas of backend:v1.2.3)
+#   ReplicaSet enforces the count (always 2 pods running)
+#   Pods are the actual running containers
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# ROLLING UPDATE STRATEGY (ZERO DOWNTIME)
+# ─────────────────────────────────────────────────────────────────────────────
+# When you push a new image (kubectl set image or kubectl apply):
+#
+#   BEFORE:  [backend-v1] [backend-v1]   (2 replicas running)
+#
+#   Step 1: Create 1 new pod (v2)        [backend-v1] [backend-v1] [backend-v2]
+#   Step 2: Wait for v2 to be Ready      ← readinessProbe must pass
+#   Step 3: Terminate 1 old pod (v1)     [backend-v1] [backend-v2]
+#   Step 4: Create 1 more v2 pod         [backend-v1] [backend-v2] [backend-v2]
+#   Step 5: Wait for ready
+#   Step 6: Terminate last v1            [backend-v2] [backend-v2]
+#
+#   AFTER:   [backend-v2] [backend-v2]   (2 replicas, zero downtime!)
+#
+# maxSurge: 1 → Allow 1 extra pod ABOVE desired count during update
+# maxUnavailable: 0 → Never go BELOW desired count (no service degradation)
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: apps/v1
+kind: Deployment
+
+metadata:
+  name: backend
+  namespace: three-tier
+
+  labels:
+    app: backend
+    app.kubernetes.io/name: backend
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: three-tier-portfolio
+    app.kubernetes.io/version: "1.0.0"
+
+  annotations:
+    description: "Node.js/Express REST API — Tier 2 of the three-tier application"
+    # Deployment change-cause is shown in rollout history:
+    # kubectl rollout history deployment/backend -n three-tier
+    kubernetes.io/change-cause: "Initial deployment — Day 7"
+
+spec:
+  # ─────────────────────────────────────────────────────────────────────────
+  # REPLICA COUNT
+  # ─────────────────────────────────────────────────────────────────────────
+  # 2 replicas ensures:
+  #   1. High Availability: if one pod crashes, traffic routes to the other
+  #   2. Zero-downtime rolling updates
+  #   3. Load distribution across 2 EKS nodes (different AZs recommended)
+  #
+  # The HPA (hpa.yaml) will override this at runtime based on CPU/memory.
+  # Don't set replicas in Deployment if HPA is managing it (use minReplicas in HPA).
+  replicas: 2
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # SELECTOR — Links Deployment to its Pods
+  # ─────────────────────────────────────────────────────────────────────────
+  # The Deployment (via ReplicaSet) manages ALL pods matching this selector.
+  # MUST match spec.template.metadata.labels.
+  # IMMUTABLE after creation — changing requires deleting and recreating.
+  selector:
+    matchLabels:
+      app: backend
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # UPDATE STRATEGY
+  # ─────────────────────────────────────────────────────────────────────────
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1         # Allow 1 extra pod beyond `replicas` during update
+      maxUnavailable: 0   # Never reduce below `replicas` during update
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # REVISION HISTORY
+  # ─────────────────────────────────────────────────────────────────────────
+  # How many old ReplicaSets to keep for rollback.
+  # kubectl rollout undo deployment/backend -n three-tier
+  # keeps the last 5 versions. Default is 10.
+  revisionHistoryLimit: 5
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # POD TEMPLATE
+  # ─────────────────────────────────────────────────────────────────────────
+  template:
+    metadata:
+      labels:
+        app: backend
+        app.kubernetes.io/name: backend
+        app.kubernetes.io/component: api
+        app.kubernetes.io/part-of: three-tier-portfolio
+        app.kubernetes.io/version: "1.0.0"
+
+      annotations:
+        # Prometheus scraping annotation (Day 25 — monitoring)
+        # prometheus.io/scrape: "true"
+        # prometheus.io/port: "5000"
+        # prometheus.io/path: "/metrics"
+        description: "Backend pod — Node.js Express API"
+
+    spec:
+      # ───────────────────────────────────────────────────────────────────
+      # POD-LEVEL SECURITY CONTEXT
+      # ───────────────────────────────────────────────────────────────────
+      securityContext:
+        runAsNonRoot: true    # Pod fails to start if container tries to run as root
+        runAsUser: 1000       # UID 1000 = 'nodejs' user created in Dockerfile
+        runAsGroup: 1000      # GID 1000 = 'nodejs' group
+        fsGroup: 1000         # Files in mounted volumes owned by GID 1000
+
+      # ───────────────────────────────────────────────────────────────────
+      # POD ANTI-AFFINITY — Spread pods across nodes/AZs
+      # ───────────────────────────────────────────────────────────────────
+      affinity:
+        podAntiAffinity:
+          # preferredDuringSchedulingIgnoredDuringExecution:
+          # K8s tries to schedule pods on DIFFERENT nodes.
+          # If only 1 node exists, it still schedules (not hard requirement).
+          # Use requiredDuring... for strict enforcement (may leave pods Pending).
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100   # Highest preference weight
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: backend  # "Don't schedule near other backend pods"
+                # topology key controls what "different" means:
+                # kubernetes.io/hostname = different NODES
+                # topology.kubernetes.io/zone = different AZs
+                topologyKey: kubernetes.io/hostname
+
+      # ───────────────────────────────────────────────────────────────────
+      # GRACEFUL SHUTDOWN
+      # ───────────────────────────────────────────────────────────────────
+      # How long K8s waits for the pod to finish in-flight requests
+      # before force-killing it with SIGKILL.
+      # Our index.js handles SIGTERM → server.close() → mongoose.close()
+      # 30 seconds is enough for most API requests to complete.
+      terminationGracePeriodSeconds: 30
+
+      containers:
+        - name: backend
+          # ─────────────────────────────────────────────────────────────
+          # IMAGE — Updated by CI/CD on every merge to main (Day 24)
+          # ─────────────────────────────────────────────────────────────
+          # Format: <ecr-registry>/<repo-name>:<git-sha-tag>
+          # Example: 123456789.dkr.ecr.us-east-1.amazonaws.com/three-tier-backend:a1b2c3d
+          #
+          # ⚠️  NEVER use :latest in production deployments!
+          # :latest is a mutable tag — it can silently point to a new image.
+          # Use immutable git SHA tags for reproducible deployments.
+          # In CI/CD (Day 24), IMAGE_TAG = git rev-parse --short HEAD
+          image: <AWS_ACCOUNT_ID>.dkr.ecr.<AWS_REGION>.amazonaws.com/three-tier-backend:latest
+          imagePullPolicy: Always
+
+          # ─────────────────────────────────────────────────────────────
+          # PORTS
+          # ─────────────────────────────────────────────────────────────
+          ports:
+            - name: http
+              containerPort: 5000
+              protocol: TCP
+
+          # ─────────────────────────────────────────────────────────────
+          # ENVIRONMENT VARIABLES
+          # ─────────────────────────────────────────────────────────────
+          env:
+            # Non-secret values from ConfigMap
+            - name: PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: backend-config    # Must match configmap.yaml metadata.name
+                  key: PORT
+
+            - name: NODE_ENV
+              valueFrom:
+                configMapKeyRef:
+                  name: backend-config
+                  key: NODE_ENV
+
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: backend-config
+                  key: LOG_LEVEL
+
+            # Secret value from K8s Secret (base64 in etcd)
+            # MONGO_URI contains: mongodb://admin:password@mongo-service:27017/tasksdb
+            - name: MONGO_URI
+              valueFrom:
+                secretKeyRef:
+                  name: mongo-secret      # Must match secret.yaml metadata.name
+                  key: MONGO_URI
+
+          # ─────────────────────────────────────────────────────────────
+          # RESOURCE REQUESTS & LIMITS
+          # ─────────────────────────────────────────────────────────────
+          # requests: Guaranteed resources. K8s scheduler uses this for placement.
+          # limits: Maximum resources. Enforced by cgroups in the kernel.
+          #
+          # Node.js CPU characteristics:
+          #   - Single-threaded event loop: 1 CPU core = ceiling for pure compute
+          #   - 500m (0.5 vCPU) is enough for an API serving moderate traffic
+          #   - Scale out (more pods via HPA) rather than scale up (more CPU per pod)
+          #
+          # Node.js Memory characteristics:
+          #   - V8 heap: 256Mi is adequate for a simple CRUD API
+          #   - Increase if app handles large file uploads or in-memory caching
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+
+          # ─────────────────────────────────────────────────────────────
+          # LIVENESS PROBE — "Is the process alive?"
+          # ─────────────────────────────────────────────────────────────
+          # Uses our GET /health endpoint (added Day 3, Commit 4).
+          # If this fails 3 times → kubelet kills and restarts the container.
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http         # References the named port above
+            initialDelaySeconds: 15   # Give Node.js + Mongoose time to connect
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+            successThreshold: 1
+
+          # ─────────────────────────────────────────────────────────────
+          # READINESS PROBE — "Can the pod serve traffic?"
+          # ─────────────────────────────────────────────────────────────
+          # Same /health endpoint, but controls Service traffic routing.
+          # If MongoDB is disconnected, /health returns 503 → pod removed
+          # from Service endpoints → no traffic sent to unhealthy pod.
+          # Pod is NOT killed (liveness handles that separately).
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+            successThreshold: 1
+
+          # ─────────────────────────────────────────────────────────────
+          # CONTAINER-LEVEL SECURITY CONTEXT
+          # ─────────────────────────────────────────────────────────────
+          securityContext:
+            # Prevent the container from gaining more privileges than its parent
+            allowPrivilegeEscalation: false
+            # Drop ALL Linux capabilities (we don't need NET_BIND_SERVICE
+            # since we're on port 5000, not 80/443)
+            capabilities:
+              drop:
+                - ALL
+            # Make the root filesystem read-only (app code can't be modified at runtime)
+            # Logs and temp files go to writable volumes if needed
+            readOnlyRootFilesystem: true
+
+          # ─────────────────────────────────────────────────────────────
+          # VOLUME MOUNTS (required for read-only root filesystem)
+          # ─────────────────────────────────────────────────────────────
+          volumeMounts:
+            - name: tmp-dir
+              mountPath: /tmp
+              # Node.js and some libraries write to /tmp
+              # With readOnlyRootFilesystem: true, we need an explicit writable /tmp
+
+      # ─────────────────────────────────────────────────────────────────
+      # VOLUMES
+      # ─────────────────────────────────────────────────────────────────
+      volumes:
+        - name: tmp-dir
+          emptyDir: {}
+          # emptyDir: lives for the lifetime of the pod (ephemeral)
+          # Created fresh on pod start, deleted on pod stop
+          # Perfect for /tmp — temporary writes that don't need persistence

@@ -1,0 +1,83 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/backend/service.yaml — Backend Kubernetes Service (ClusterIP)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# WHAT IS A KUBERNETES SERVICE?
+# ─────────────────────────────────────────────────────────────────────────────
+# Pods are ephemeral — they start, crash, get rescheduled with NEW IP addresses.
+# A Service provides a STABLE network endpoint (DNS name + virtual IP) that
+# always routes to the healthy pods behind it.
+#
+# Without a Service:
+#   Frontend calls http://10.0.1.23:5000/api/tasks (backend pod IP)
+#   Backend pod restarts → gets new IP 10.0.1.47 → frontend calls wrong IP → 404
+#
+# With a Service:
+#   Frontend calls http://backend-service.three-tier.svc.cluster.local:3001/api/tasks
+#   K8s kube-proxy routes to a healthy backend pod (always current IP)
+#   Backend pod restarts → Service endpoints update → frontend still works
+#
+# HOW SERVICES ROUTE TRAFFIC:
+# ─────────────────────────────────────────────────────────────────────────────
+# The Service uses the `selector` to find matching pods.
+# kube-proxy watches the Endpoints resource (list of healthy pod IPs + ports).
+# It programs iptables/ipvs rules on EVERY node to route VIP:port → pod IPs.
+#
+# Load balancing: Round-robin by default (iptables random match)
+# Health aware: Pods failing readinessProbe are removed from Endpoints
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: v1
+kind: Service
+
+metadata:
+  name: backend-service
+  namespace: three-tier
+
+  labels:
+    app: backend
+    app.kubernetes.io/name: backend
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: three-tier-portfolio
+
+  annotations:
+    description: >
+      ClusterIP service for backend pods. Accessible within the cluster at:
+      backend-service.three-tier.svc.cluster.local:3001
+      The ALB Ingress routes /api/* to this service (Day 10).
+
+spec:
+  # type: ClusterIP — accessible ONLY within the cluster.
+  # The backend must NOT be exposed directly to the internet.
+  # External traffic reaches the backend via:
+  #   Internet → ALB → Ingress → backend-service → backend pods
+  # NOT:
+  #   Internet → backend-service (ClusterIP blocks external access)
+  type: ClusterIP
+
+  # selector: Routes traffic to pods with matching labels.
+  # Must match deployment.yaml spec.template.metadata.labels.
+  # When a pod's readinessProbe fails, K8s removes it from Endpoints
+  # (Service automatically stops routing to unhealthy pods).
+  selector:
+    app: backend
+
+  ports:
+    - name: http
+      # port: The port the Service listens on (from other pods' perspective).
+      # Frontend calls: http://backend-service:3001/api/tasks
+      # Port 3001 (not 5000) to distinguish Service port from container port.
+      # This is a common convention — Service port ≠ container port.
+      port: 3001
+
+      # targetPort: The port on the pod container.
+      # Must match containerPort in deployment.yaml (5000).
+      # Can reference by name: targetPort: http (matches containerPort name)
+      targetPort: http
+
+      protocol: TCP
+
+  # sessionAffinity: None = random/round-robin load balancing.
+  # For a REST API with no session state (JWT auth), None is correct.
+  # If using session cookies, use ClientIP (sticky sessions).
+  sessionAffinity: None

@@ -1,0 +1,54 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/backend/configmap.yaml — Backend ConfigMap (Non-Secret Config)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# CONFIGMAP vs SECRET — WHEN TO USE WHICH:
+# ─────────────────────────────────────────────────────────────────────────────
+# ConfigMap:
+#   - Stores NON-SENSITIVE configuration data
+#   - Stored as plain text in etcd (NOT encoded)
+#   - Visible to anyone with kubectl access
+#   - Use for: PORT, NODE_ENV, feature flags, log levels, URLs without credentials
+#
+# Secret:
+#   - Stores SENSITIVE data
+#   - Stored as base64 in etcd (NOT encrypted by default — use KMS for encryption)
+#   - Use for: passwords, API keys, TLS certs, tokens, connection strings with creds
+#
+# RULE: If the value would cause a security incident if leaked → use Secret.
+#        If losing it is just inconvenient → use ConfigMap.
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: v1
+kind: ConfigMap
+
+metadata:
+  name: backend-config
+  namespace: three-tier
+
+  labels:
+    app: backend
+    app.kubernetes.io/name: backend
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: three-tier-portfolio
+
+  annotations:
+    description: "Non-sensitive configuration for the backend Node.js service"
+
+data:
+  # PORT: The Express server listen port.
+  # Must match the Service spec.ports[].targetPort (see service.yaml)
+  # Must match the EXPOSE instruction in app/backend/Dockerfile
+  PORT: "5000"
+
+  # NODE_ENV: Controls Express behavior and error verbosity.
+  # "production":
+  #   - Express disables stack traces in error responses (security)
+  #   - Express is ~3x faster (template caching, no reload on change)
+  #   - npm skips devDependencies (already handled by Docker image)
+  NODE_ENV: "production"
+
+  # LOG_LEVEL: Application-level logging verbosity.
+  # Used by future logging middleware (morgan, winston).
+  # "info" in production — "debug" during local development.
+  LOG_LEVEL: "info"
