@@ -1,0 +1,195 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/frontend/deployment.yaml — Frontend Kubernetes Deployment
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# KEY DIFFERENCES FROM BACKEND DEPLOYMENT:
+# ─────────────────────────────────────────────────────────────────────────────
+# 1. Container runs Nginx (not Node.js) — stateless static file server
+# 2. No database dependencies or secret mounts needed
+# 3. Port 80 (Nginx) instead of 5000 (Node.js)
+# 4. Health probe hits /nginx-health (Nginx endpoint, not Express /health)
+# 5. Uses a ConfigMap for NGINX_PORT (documentation — actual port is in nginx.conf)
+#
+# FRONTEND IN THREE-TIER ARCHITECTURE:
+# ─────────────────────────────────────────────────────────────────────────────
+# Tier 1 (Presentation):
+#   - Serves pre-compiled React SPA (HTML/CSS/JS static files)
+#   - REACT_APP_BACKEND_URL is baked into the JS bundle at Docker build time
+#   - Browser loads React, then makes API calls DIRECTLY to the backend ALB path
+#   - Frontend Nginx does NOT proxy API calls (the browser does, using baked-in URL)
+#
+# TRAFFIC FLOW:
+#   User browser
+#     │ GET http://<ALB>/
+#     ▼ ALB routes /* to frontend-service
+#   frontend-service (this service)
+#     │
+#     ▼ Nginx pod serves index.html + static assets
+#   Browser receives React app
+#     │ Browser runs React → makes API calls
+#     │ GET http://<ALB>/api/tasks (baked-in REACT_APP_BACKEND_URL)
+#     ▼ ALB routes /api/* to backend-service (separate Ingress rule)
+#   backend-service → backend pods → MongoDB
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: apps/v1
+kind: Deployment
+
+metadata:
+  name: frontend
+  namespace: three-tier
+
+  labels:
+    app: frontend
+    app.kubernetes.io/name: frontend
+    app.kubernetes.io/component: web
+    app.kubernetes.io/part-of: three-tier-portfolio
+    app.kubernetes.io/version: "1.0.0"
+
+  annotations:
+    description: "React SPA served by Nginx — Tier 1 of the three-tier application"
+    kubernetes.io/change-cause: "Initial deployment — Day 7"
+
+spec:
+  replicas: 2
+  # 2 replicas: High availability + zero-downtime rolling updates.
+  # HPA (hpa.yaml) will scale this between 2-5 replicas based on CPU.
+
+  selector:
+    matchLabels:
+      app: frontend
+
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+
+  revisionHistoryLimit: 5
+
+  template:
+    metadata:
+      labels:
+        app: frontend
+        app.kubernetes.io/name: frontend
+        app.kubernetes.io/component: web
+        app.kubernetes.io/part-of: three-tier-portfolio
+        app.kubernetes.io/version: "1.0.0"
+
+    spec:
+      # ───────────────────────────────────────────────────────────────────
+      # SECURITY CONTEXT
+      # ───────────────────────────────────────────────────────────────────
+      # Nginx master process NEEDS to bind to port 80 (requires root or NET_BIND_SERVICE).
+      # The official nginx:alpine image handles this: master runs as root briefly,
+      # then worker processes drop to the 'nginx' user (configured in nginx.conf).
+      # We allow this but restrict individual containers below.
+      securityContext:
+        fsGroup: 101   # nginx group ID in the official nginx:alpine image
+
+      # ───────────────────────────────────────────────────────────────────
+      # POD ANTI-AFFINITY
+      # ───────────────────────────────────────────────────────────────────
+      # Spread frontend pods across different nodes (different AZs).
+      # If node-1 goes down, frontend pods on node-2 continue serving.
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: frontend
+                topologyKey: kubernetes.io/hostname
+
+      terminationGracePeriodSeconds: 30
+
+      containers:
+        - name: frontend
+          # ─────────────────────────────────────────────────────────────
+          # IMAGE — Updated by CI/CD on every merge (Day 24)
+          # ─────────────────────────────────────────────────────────────
+          # CRITICAL: REACT_APP_BACKEND_URL was baked into THIS image at build time.
+          # If the ALB DNS changes, you MUST rebuild and push a new image.
+          # The URL is NOT configurable at pod startup (not a runtime env var).
+          image: <AWS_ACCOUNT_ID>.dkr.ecr.<AWS_REGION>.amazonaws.com/three-tier-frontend:latest
+          imagePullPolicy: Always
+
+          ports:
+            - name: http
+              containerPort: 80     # Nginx listens on port 80 (see nginx.conf)
+              protocol: TCP
+
+          # ─────────────────────────────────────────────────────────────
+          # RESOURCES
+          # ─────────────────────────────────────────────────────────────
+          # Nginx is extremely lightweight for static file serving.
+          # CPU and memory usage is minimal — Nginx is primarily I/O bound.
+          # For 1000 concurrent users: 1 Nginx pod handles it easily.
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "128Mi"
+              cpu: "200m"
+
+          # ─────────────────────────────────────────────────────────────
+          # LIVENESS PROBE
+          # ─────────────────────────────────────────────────────────────
+          # Checks if Nginx process is alive and serving.
+          # /nginx-health defined in nginx.conf → returns 200 instantly.
+          livenessProbe:
+            httpGet:
+              path: /nginx-health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          # ─────────────────────────────────────────────────────────────
+          # READINESS PROBE
+          # ─────────────────────────────────────────────────────────────
+          readinessProbe:
+            httpGet:
+              path: /nginx-health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          # ─────────────────────────────────────────────────────────────
+          # SECURITY CONTEXT (container-level)
+          # ─────────────────────────────────────────────────────────────
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - NET_BIND_SERVICE
+                # NET_BIND_SERVICE: Allows binding to port 80 (privileged port < 1024)
+                # Nginx master process needs this to listen on port 80.
+                # Alternative: Use nginxinc/nginx-unprivileged on port 8080 (no capability needed).
+
+          # ─────────────────────────────────────────────────────────────
+          # VOLUME MOUNTS
+          # ─────────────────────────────────────────────────────────────
+          volumeMounts:
+            - name: nginx-cache
+              mountPath: /var/cache/nginx
+              # Nginx writes cache files here during request processing
+            - name: nginx-pid
+              mountPath: /var/run
+              # Nginx writes its PID file to /var/run/nginx.pid
+
+      # ─────────────────────────────────────────────────────────────────
+      # VOLUMES — Writable directories for Nginx runtime files
+      # ─────────────────────────────────────────────────────────────────
+      volumes:
+        - name: nginx-cache
+          emptyDir: {}
+        - name: nginx-pid
+          emptyDir: {}

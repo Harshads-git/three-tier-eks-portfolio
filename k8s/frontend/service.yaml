@@ -1,0 +1,64 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/frontend/service.yaml — Frontend Kubernetes Service (NodePort)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# WHY NODEPORT FOR FRONTEND (NOT CLUSTERIP)?
+# ─────────────────────────────────────────────────────────────────────────────
+# The ALB Ingress Controller (AWS Load Balancer Controller) requires the
+# target services to be type NodePort or LoadBalancer.
+#
+# The ALB directly talks to the EC2 node IP + NodePort (bypasses kube-proxy).
+# This is called "Instance Mode" for ALB target groups.
+#
+# Traffic flow:
+#   Browser → ALB (port 80/443) → EC2 node:NodePort (31000-32767)
+#     → kube-proxy → frontend pod:80
+#
+# The NodePort is auto-assigned by K8s (we don't specify it).
+# The ALB Ingress Controller discovers the NodePort automatically.
+#
+# ALTERNATIVE: IP Mode
+# ALB can also route directly to pod IPs (bypassing NodePort).
+# This requires vpc-cni plugin and is more efficient but adds complexity.
+# NodePort is simpler for this portfolio project.
+#
+# CLUSTERIP vs NODEPORT COMPARISON:
+# ─────────────────────────────────────────────────────────────────────────────
+# ClusterIP: Only reachable within the cluster (internal services like backend, mongo)
+# NodePort:  Reachable via <NodeIP>:<NodePort> from outside (needed for ALB)
+# LoadBalancer: Provisions a cloud LB per service (expensive, use Ingress instead)
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: v1
+kind: Service
+
+metadata:
+  name: frontend-service
+  namespace: three-tier
+
+  labels:
+    app: frontend
+    app.kubernetes.io/name: frontend
+    app.kubernetes.io/component: web
+    app.kubernetes.io/part-of: three-tier-portfolio
+
+  annotations:
+    description: >
+      NodePort service for frontend pods. Required for ALB Ingress Controller
+      to route external HTTP traffic to Nginx pods.
+      ALB routes /* to this service, /api/* to backend-service.
+
+spec:
+  type: NodePort
+
+  selector:
+    app: frontend
+
+  ports:
+    - name: http
+      port: 80           # Service port (internal cluster access)
+      targetPort: http   # Pod container port (named port in deployment.yaml)
+      protocol: TCP
+      # nodePort: <not specified> — K8s auto-assigns from range 30000-32767
+      # The ALB Ingress Controller reads this auto-assigned port automatically.
+      # Specifying a fixed nodePort is possible but risks port conflicts.
