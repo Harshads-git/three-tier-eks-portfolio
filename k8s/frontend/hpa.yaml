@@ -1,0 +1,73 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/frontend/hpa.yaml — HorizontalPodAutoscaler for Frontend
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# WHY HPA FOR NGINX (FRONTEND)?
+# ─────────────────────────────────────────────────────────────────────────────
+# Nginx serving static files is extremely efficient, but under very high
+# concurrent connections (thousands of users), CPU and file descriptor limits
+# can become bottlenecks. HPA ensures we scale out Nginx pods automatically.
+#
+# Nginx scales horizontally much more efficiently than Node.js:
+#   Node.js: single-threaded event loop → CPU is the bottleneck
+#   Nginx: multi-worker + kernel sendfile → I/O is rarely the bottleneck
+#
+# For the frontend, CPU threshold is set HIGHER (80%) because Nginx rarely
+# hits CPU limits under normal static file serving loads.
+# Scaling is triggered more by concurrent connections / memory.
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+
+metadata:
+  name: frontend-hpa
+  namespace: three-tier
+
+  labels:
+    app: frontend
+    app.kubernetes.io/name: frontend
+    app.kubernetes.io/component: web
+    app.kubernetes.io/part-of: three-tier-portfolio
+
+  annotations:
+    description: "Autoscales frontend Nginx pods between 2-5 replicas based on CPU (80%) and memory (80%)"
+
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: frontend
+
+  minReplicas: 2
+  maxReplicas: 5
+
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          # 80% threshold (higher than backend) — Nginx rarely CPU-bound for static files
+          averageUtilization: 80
+
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 120

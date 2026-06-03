@@ -1,0 +1,114 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/backend/hpa.yaml — HorizontalPodAutoscaler for Backend
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# WHAT IS AN HPA?
+# ─────────────────────────────────────────────────────────────────────────────
+# HorizontalPodAutoscaler automatically adjusts the number of pod replicas
+# in a Deployment based on observed CPU/memory utilization.
+#
+# When traffic SPIKES:
+#   HPA detects CPU > 70% → scales replicas UP → 2 → 3 → 4 → 5
+#   More pods → more capacity → CPU drops → users aren't impacted
+#
+# When traffic DROPS:
+#   HPA detects CPU < 70% → scales replicas DOWN → 5 → 4 → 3 → 2
+#   Fewer pods → less EC2 compute needed → saves AWS costs
+#
+# PREREQUISITES (required before HPA works):
+#   1. Metrics Server must be installed in the cluster:
+#      kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+#      (Done in Terraform Day 13, or: eksctl utils install-metrics-server)
+#   2. Deployment containers MUST have resource requests defined.
+#      HPA calculates utilization as: current_usage / requested_amount
+#      Without requests, HPA can't calculate a percentage → HPA shows "unknown"
+#
+# VERIFY HPA IS WORKING:
+#   kubectl get hpa -n three-tier
+#   kubectl describe hpa backend-hpa -n three-tier
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+
+metadata:
+  name: backend-hpa
+  namespace: three-tier
+
+  labels:
+    app: backend
+    app.kubernetes.io/name: backend
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: three-tier-portfolio
+
+  annotations:
+    description: "Autoscales backend pods between 2-5 replicas based on CPU (70%) and memory (80%)"
+
+spec:
+  # scaleTargetRef: The resource this HPA manages.
+  # HPA overrides the `replicas` field in the referenced Deployment.
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: backend            # Must match deployment.yaml metadata.name
+
+  # Replica bounds:
+  # minReplicas: Never scale below 2 (high availability, not single point of failure)
+  # maxReplicas: Never scale above 5 (cost control + EC2 node capacity limit)
+  minReplicas: 2
+  maxReplicas: 5
+
+  metrics:
+    # ─────────────────────────────────────────────────────────────────────
+    # METRIC 1: CPU Utilization
+    # ─────────────────────────────────────────────────────────────────────
+    # Scale up when average CPU across all backend pods exceeds 70%.
+    # Target: 70% of the `requests.cpu: 100m` → 70m CPU per pod
+    #
+    # Example:
+    #   2 pods, each using 80m CPU → 80% utilization → above 70% threshold
+    #   HPA adds 1 pod → now 3 pods → 80m total spread over 3 → ~53% → stable
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70    # Scale up if avg CPU > 70% of request
+
+    # ─────────────────────────────────────────────────────────────────────
+    # METRIC 2: Memory Utilization
+    # ─────────────────────────────────────────────────────────────────────
+    # Memory leaks in Node.js are common — this catches them before OOMKill.
+    # Scale up when average memory across pods exceeds 80%.
+    # Target: 80% of `requests.memory: 128Mi` → ~102Mi per pod
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80    # Scale up if avg memory > 80% of request
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # SCALING BEHAVIOR (Fine-grained control over scale up/down speed)
+  # ─────────────────────────────────────────────────────────────────────────
+  behavior:
+    scaleUp:
+      # Scale UP quickly (traffic spikes need fast response)
+      # stabilizationWindowSeconds: Wait 30s before scaling up again
+      # (prevents "thrashing" — repeatedly adding/removing pods)
+      stabilizationWindowSeconds: 30
+      policies:
+        # Allow adding at most 2 pods per 60 seconds
+        - type: Pods
+          value: 2
+          periodSeconds: 60
+
+    scaleDown:
+      # Scale DOWN slowly (don't remove pods too quickly — may cause traffic drops)
+      # Wait 5 minutes before scaling down (let metrics stabilize)
+      stabilizationWindowSeconds: 300
+      policies:
+        # Remove at most 1 pod per 120 seconds (conservative scale-down)
+        - type: Pods
+          value: 1
+          periodSeconds: 120
