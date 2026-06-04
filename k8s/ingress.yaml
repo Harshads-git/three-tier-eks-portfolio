@@ -1,0 +1,218 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/ingress.yaml — AWS Application Load Balancer Ingress
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# WHAT IS AN INGRESS?
+# ─────────────────────────────────────────────────────────────────────────────
+# An Ingress is a K8s resource that manages EXTERNAL access to Services.
+# It defines routing rules: which HTTP paths go to which backend Services.
+#
+# WITHOUT INGRESS (naive approach):
+#   - Frontend: LoadBalancer Service → 1 AWS ALB/NLB ($20/month)
+#   - Backend:  LoadBalancer Service → 1 more AWS ALB/NLB ($20/month)
+#   - Total: $40+/month just for two load balancers
+#   - No centralized TLS, no path-based routing
+#
+# WITH INGRESS (production approach):
+#   - ONE AWS ALB handles ALL external traffic
+#   - Path-based rules route to different Services
+#   - TLS termination at the ALB (one certificate covers everything)
+#   - Total: ~$20/month for ONE ALB
+#
+# INGRESS CONTROLLER — THE MISSING PIECE:
+# ─────────────────────────────────────────────────────────────────────────────
+# Ingress is just a YAML spec. It needs an Ingress Controller to act on it.
+# The controller watches for Ingress resources and provisions the actual infra.
+#
+# We use: AWS Load Balancer Controller (formerly ALB Ingress Controller)
+#   - Installed via Helm (Day 13)
+#   - Watches for Ingress resources with annotation: kubernetes.io/ingress.class: alb
+#   - Provisions an AWS ALB with the exact path rules from the Ingress spec
+#   - Updates the ALB automatically when the Ingress YAML changes
+#
+# PATH-BASED ROUTING IN THIS INGRESS:
+# ─────────────────────────────────────────────────────────────────────────────
+#  /api/*  → backend-service:3001  (Node.js Express REST API)
+#  /*      → frontend-service:80   (Nginx serving React SPA)
+#
+# TRAFFIC FLOW:
+#   Browser
+#     │ GET https://<ALB-DNS>/
+#     ▼ ALB checks routing rules (longest prefix match)
+#   Rule 1: /api/* → backend-service:3001 → backend pods
+#   Rule 2: /*     → frontend-service:80  → frontend pods
+#
+# The order of rules matters! More specific paths (/api/*) must be listed
+# BEFORE catch-all rules (/*) in the Ingress spec.
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+
+metadata:
+  name: three-tier-ingress
+  namespace: three-tier
+
+  labels:
+    app.kubernetes.io/name: three-tier-ingress
+    app.kubernetes.io/component: ingress
+    app.kubernetes.io/part-of: three-tier-portfolio
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # ANNOTATIONS — AWS Load Balancer Controller Configuration
+  # ─────────────────────────────────────────────────────────────────────────
+  # These annotations control how the ALB is provisioned by the controller.
+  # They are the primary way to configure ALB behavior from Kubernetes.
+  annotations:
+
+    # ── INGRESS CLASS ───────────────────────────────────────────────────────
+    # Tells K8s which Ingress Controller to use for this Ingress resource.
+    # "alb" → AWS Load Balancer Controller
+    # Other values: nginx (for Nginx Ingress), traefik, kong, etc.
+    kubernetes.io/ingress.class: alb
+
+    # ── SCHEME ──────────────────────────────────────────────────────────────
+    # internet-facing: ALB gets a public IP (accessible from internet)
+    # internal:        ALB is only accessible from within the VPC
+    # For our portfolio: internet-facing (users access from browser)
+    # For internal APIs: use 'internal'
+    alb.ingress.kubernetes.io/scheme: internet-facing
+
+    # ── TARGET TYPE ─────────────────────────────────────────────────────────
+    # How the ALB routes traffic to targets:
+    # instance: Routes to EC2 node IP + NodePort → kube-proxy → pod
+    #   Requires: Services to be type NodePort (our setup)
+    #   Pros: simpler, works with any CNI
+    #   Cons: extra hop through kube-proxy, slightly higher latency
+    #
+    # ip: Routes directly to pod IP (bypasses kube-proxy)
+    #   Requires: VPC CNI (aws-node DaemonSet) — common in EKS
+    #   Pros: lower latency, pods get real client IPs
+    #   Cons: more complex, requires VPC CNI
+    #
+    # We use 'instance' for simplicity (NodePort Services)
+    alb.ingress.kubernetes.io/target-type: instance
+
+    # ── LISTEN PORTS ────────────────────────────────────────────────────────
+    # Which ports the ALB listens on.
+    # Port 80 (HTTP) and 443 (HTTPS) are the standard combination.
+    # We include both: 80 for redirect to HTTPS, 443 for actual traffic.
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+
+    # ── SSL REDIRECT ────────────────────────────────────────────────────────
+    # Automatically redirect all HTTP (port 80) requests to HTTPS (port 443).
+    # The ALB handles this redirect before traffic reaches your pods.
+    # Result: http://myapp.example.com → 301 Redirect → https://myapp.example.com
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+
+    # ── CERTIFICATE ARN ─────────────────────────────────────────────────────
+    # ARN of the ACM (AWS Certificate Manager) TLS certificate.
+    # This is provisioned via Terraform (Day 15) or manually via ACM console.
+    # Replace with your actual certificate ARN before deploying.
+    #
+    # To get your cert ARN:
+    #   aws acm list-certificates --region us-east-1
+    #   Or in Terraform: aws_acm_certificate.this.arn
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:<AWS_REGION>:<AWS_ACCOUNT_ID>:certificate/<CERTIFICATE_ID>
+
+    # ── HEALTH CHECK ────────────────────────────────────────────────────────
+    # ALB health check configuration for backend target group.
+    # The ALB checks each EC2 node's NodePort to determine if it's healthy.
+    # If the health check fails → node is removed from ALB target group.
+    alb.ingress.kubernetes.io/healthcheck-protocol: HTTP
+    alb.ingress.kubernetes.io/healthcheck-path: /health
+    # Note: /health works for backend. For frontend nodes, use /nginx-health.
+    # The ALB creates separate target groups per Service rule — each can have
+    # its own healthcheck path (configured via separate annotation on each rule).
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: "15"
+    alb.ingress.kubernetes.io/healthcheck-timeout-seconds: "5"
+    alb.ingress.kubernetes.io/healthy-threshold-count: "2"
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: "3"
+
+    # ── SUBNETS ─────────────────────────────────────────────────────────────
+    # Specify which VPC subnets the ALB should deploy into.
+    # For internet-facing ALB: use PUBLIC subnets (tagged with kubernetes.io/role/elb: 1)
+    # The AWS LB Controller auto-discovers subnets with the correct tags.
+    # Alternatively, specify explicitly:
+    # alb.ingress.kubernetes.io/subnets: subnet-abc123, subnet-def456
+    # (We rely on auto-discovery via subnet tags — set up in Terraform Day 11)
+
+    # ── SECURITY GROUPS ─────────────────────────────────────────────────────
+    # Additional security groups to attach to the ALB.
+    # The controller creates a security group automatically.
+    # To add custom rules (e.g., restrict to specific IPs):
+    # alb.ingress.kubernetes.io/security-groups: sg-abc123
+
+    # ── ALB ATTRIBUTES ──────────────────────────────────────────────────────
+    # Additional ALB attributes (comma-separated key=value pairs):
+    # access_logs.s3.enabled=true → Enable ALB access logs to S3 (Day 25 monitoring)
+    # access_logs.s3.bucket=my-alb-logs → S3 bucket for logs
+    # deletion_protection.enabled=true → Prevent accidental ALB deletion
+    # idle_timeout.timeout_seconds=60 → Connection idle timeout (default 60)
+    alb.ingress.kubernetes.io/load-balancer-attributes: |
+      routing.http2.enabled=true,
+      idle_timeout.timeout_seconds=60
+
+    # ── TAGS ────────────────────────────────────────────────────────────────
+    # AWS tags applied to the ALB resource (visible in AWS Console).
+    # Useful for cost allocation, compliance, and resource organization.
+    alb.ingress.kubernetes.io/tags: |
+      Project=three-tier-portfolio,
+      Environment=production,
+      ManagedBy=kubernetes
+
+    description: >
+      Main Ingress resource for the three-tier application.
+      Provisions an AWS ALB with path-based routing.
+      /api/* → backend-service (Node.js Express)
+      /*     → frontend-service (Nginx React SPA)
+
+spec:
+  # ingressClassName: Alternative to annotation (preferred in K8s 1.18+).
+  # Either this OR the annotation works. We include both for compatibility.
+  ingressClassName: alb
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # ROUTING RULES
+  # ─────────────────────────────────────────────────────────────────────────
+  rules:
+    # Host-based routing (optional): Route based on domain name.
+    # Uncomment and set your domain when DNS is configured (Day 15).
+    # - host: myapp.example.com
+    #   http:
+    #     paths: ...
+
+    # Path-based routing (no host restriction — matches any domain/IP):
+    - http:
+        paths:
+          # ── RULE 1: API Traffic → Backend ──────────────────────────────
+          # ALL requests starting with /api/ go to the backend Node.js service.
+          # This is the REST API: GET/POST/PUT/DELETE /api/tasks
+          #
+          # pathType: Prefix means /api/ matches:
+          #   /api/tasks, /api/tasks/123, /api/users, /api/anything
+          # But NOT: /api (missing trailing slash — use Prefix or Exact carefully)
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: backend-service
+                port:
+                  number: 3001
+
+          # ── RULE 2: All Other Traffic → Frontend ───────────────────────
+          # ALL other requests go to the Nginx frontend (React SPA).
+          # This includes:
+          #   / → index.html (home page)
+          #   /tasks → index.html (React Router handles this)
+          #   /static/js/main.abc123.js → actual static files
+          #
+          # pathType: Prefix with path: / is a catch-all.
+          # More specific rules (/api) are checked FIRST by the ALB.
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend-service
+                port:
+                  number: 80
