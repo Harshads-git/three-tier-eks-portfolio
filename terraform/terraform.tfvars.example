@@ -1,0 +1,87 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# terraform/terraform.tfvars.example — Variable Values Template
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# HOW TO USE THIS FILE:
+# ─────────────────────────────────────────────────────────────────────────────
+# 1. Copy this file:
+#    cp terraform.tfvars.example terraform.tfvars
+#
+# 2. Fill in your values in terraform.tfvars
+#
+# 3. Run:
+#    terraform init
+#    terraform plan -var-file=terraform.tfvars
+#    terraform apply -var-file=terraform.tfvars
+#
+# NOTE: terraform.tfvars is in .gitignore — it is NEVER committed to Git.
+#       This file (terraform.tfvars.example) IS committed as a template.
+#
+# REQUIRED CHANGES:
+#   Replace all <PLACEHOLDER> values with your actual settings.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AWS SETTINGS
+# ─────────────────────────────────────────────────────────────────────────────
+
+# AWS region to deploy all resources in
+aws_region = "us-east-1"
+
+# Deployment environment (development | staging | production)
+environment = "production"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EKS CLUSTER
+# ─────────────────────────────────────────────────────────────────────────────
+
+# EKS cluster name — used as prefix for ALL resource names
+cluster_name = "three-tier-eks-cluster"
+
+# Kubernetes version (check: aws eks describe-addon-versions for supported)
+cluster_version = "1.29"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# NODE GROUP (EC2 WORKER NODES)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# EC2 instance type for worker nodes
+# t3.medium = 2 vCPU, 4 GiB RAM — minimum for all 3 tiers
+# t3.large  = 2 vCPU, 8 GiB RAM — comfortable for production
+node_instance_type = "t3.medium"
+
+# Desired number of nodes on cluster creation
+node_desired_size = 2
+
+# Minimum nodes (Cluster Autoscaler lower bound)
+# Set to 1 for cost savings during off-hours
+node_min_size = 1
+
+# Maximum nodes (Cluster Autoscaler upper bound)
+# Controls your maximum compute cost
+node_max_size = 4
+
+# ─────────────────────────────────────────────────────────────────────────────
+# VPC NETWORKING
+# ─────────────────────────────────────────────────────────────────────────────
+
+# VPC CIDR block (65,536 IPs available)
+vpc_cidr = "10.0.0.0/16"
+
+# Availability Zones — use 2+ for high availability
+# Must exist in your selected aws_region
+availability_zones = ["us-east-1a", "us-east-1b"]
+
+# Private subnets — EKS nodes, MongoDB (no direct internet access)
+private_subnet_cidrs = ["10.0.1.0/24", "10.0.2.0/24"]
+
+# Public subnets — ALB, NAT Gateway (internet accessible)
+public_subnet_cidrs = ["10.0.101.0/24", "10.0.102.0/24"]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ECR SETTINGS
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Number of container images to keep in each ECR repository
+# Older images auto-deleted by lifecycle policy
+ecr_image_retention_count = 10
