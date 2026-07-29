@@ -1,0 +1,222 @@
+name: CI — Build, Test & Scan
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WHEN THIS RUNS:
+# ─────────────────────────────────────────────────────────────────────────────
+# - Every pull request to main: run CI (build + test + scan)
+# - Every push to main: run CI (verify the merge didn't break anything)
+# - Manual trigger: workflow_dispatch for ad-hoc validation
+#
+# PURPOSE:
+# This pipeline is the GATE before code reaches production.
+# It fails fast and early — preventing broken or insecure code from being
+# deployed. Only code that passes ALL checks here gets deployed (via cd.yml).
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "app/**"          # Only run when application code changes
+      - ".github/workflows/ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - ".github/workflows/ci.yml"
+  workflow_dispatch:      # Manual trigger from GitHub UI
+
+# Cancel any in-progress CI run if a new commit is pushed (saves minutes)
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────
+  # JOB 1: BACKEND TESTS
+  # ─────────────────────────────────────────────────────────────────────────
+  test-backend:
+    name: Backend — Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+          cache-dependency-path: app/backend/package-lock.json
+          # Caches node_modules by package-lock.json hash
+          # Cache hit = skip npm install (~30s saved per run)
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline
+        working-directory: app/backend
+        # npm ci: clean install (uses package-lock.json exactly, no updates)
+        # --prefer-offline: use cached packages first
+
+      - name: Run linter
+        run: npm run lint --if-present
+        working-directory: app/backend
+
+      - name: Run tests
+        run: npm test --if-present
+        working-directory: app/backend
+        env:
+          NODE_ENV: test
+          # Use test env to avoid MongoDB connection attempts in unit tests
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # JOB 2: FRONTEND TESTS
+  # ─────────────────────────────────────────────────────────────────────────
+  test-frontend:
+    name: Frontend — Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+          cache-dependency-path: app/frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline
+        working-directory: app/frontend
+
+      - name: Run linter
+        run: npm run lint --if-present
+        working-directory: app/frontend
+
+      - name: Run tests
+        run: npm test -- --watchAll=false --passWithNoTests
+        working-directory: app/frontend
+        env:
+          CI: true
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # JOB 3: DOCKER BUILD + TRIVY SECURITY SCAN
+  # ─────────────────────────────────────────────────────────────────────────
+  # Why build in CI before pushing to ECR?
+  #   1. Validate the Dockerfile builds without errors (fast feedback)
+  #   2. Scan the built image for CVEs BEFORE it enters the registry
+  #   3. Fail the PR if CRITICAL vulnerabilities are found
+  #
+  # Trivy is an open-source container scanner by Aqua Security.
+  # It checks: OS packages, language dependencies (npm, pip), Dockerfile config
+  # ─────────────────────────────────────────────────────────────────────────
+  build-and-scan:
+    name: Docker Build & Trivy Scan
+    runs-on: ubuntu-latest
+    needs: [test-backend, test-frontend]  # Only build if tests pass
+
+    strategy:
+      matrix:
+        service: [backend, frontend]
+        # Run build+scan for both services in parallel (matrix strategy)
+        # GitHub runs these as separate jobs concurrently
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        # Buildx: enables BuildKit (faster builds, better caching, multi-platform)
+
+      - name: Build Docker image (for scanning — no push)
+        uses: docker/build-push-action@v5
+        with:
+          context: app/${{ matrix.service }}
+          file: app/${{ matrix.service }}/Dockerfile
+          push: false          # Don't push — this is just for scanning
+          load: true           # Load into local Docker daemon for scanning
+          tags: three-tier-${{ matrix.service }}:${{ github.sha }}
+          cache-from: type=gha  # Use GitHub Actions cache for Docker layers
+          cache-to: type=gha,mode=max
+
+      - name: Run Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: three-tier-${{ matrix.service }}:${{ github.sha }}
+          format: "sarif"      # SARIF = GitHub Security tab format
+          output: "trivy-${{ matrix.service }}.sarif"
+          severity: "CRITICAL,HIGH"
+          # CRITICAL: Fail the pipeline
+          # HIGH: Report but don't fail (set exit-code: "1" to fail on HIGH)
+          exit-code: "1"       # Exit 1 if CRITICAL vulnerabilities found → fail CI
+          ignore-unfixed: true # Ignore CVEs with no fix available (can't fix what doesn't exist)
+
+      - name: Upload Trivy results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()  # Upload even if Trivy found vulnerabilities (for visibility)
+        with:
+          sarif_file: trivy-${{ matrix.service }}.sarif
+          category: trivy-${{ matrix.service }}
+
+      - name: Scan Dockerfile for misconfigurations
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: "config"
+          scan-ref: app/${{ matrix.service }}/Dockerfile
+          format: "table"
+          severity: "HIGH,CRITICAL"
+          exit-code: "0"  # Warn only for Dockerfile misconfigs (not fail)
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # JOB 4: KUBERNETES MANIFEST VALIDATION
+  # ─────────────────────────────────────────────────────────────────────────
+  validate-manifests:
+    name: Validate K8s Manifests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup kubeconform
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.4/kubeconform-linux-amd64.tar.gz \
+            | tar xz -C /usr/local/bin
+        # kubeconform: validates K8s YAML against official K8s JSON schemas
+        # Catches: typos, invalid fields, wrong API versions (e.g., deprecated apps/v1beta1)
+
+      - name: Validate all K8s manifests
+        run: |
+          kubeconform \
+            -strict \
+            -ignore-missing-schemas \
+            -schema-location default \
+            -summary \
+            k8s/**/*.yaml k8s/*.yaml
+        # -strict: reject unknown fields (catches typos like 'replcas:' instead of 'replicas:')
+        # -ignore-missing-schemas: skip CRDs (ALB Ingress) where no schema exists
+        # -summary: print count of valid/invalid/skipped resources
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # STATUS CHECK: All CI jobs must pass before CD is triggered
+  # ─────────────────────────────────────────────────────────────────────────
+  ci-success:
+    name: CI — All Checks Passed
+    runs-on: ubuntu-latest
+    needs: [test-backend, test-frontend, build-and-scan, validate-manifests]
+    if: always()
+
+    steps:
+      - name: Check all CI jobs succeeded
+        run: |
+          if [[ "${{ needs.test-backend.result }}" != "success" ]] || \
+             [[ "${{ needs.test-frontend.result }}" != "success" ]] || \
+             [[ "${{ needs.build-and-scan.result }}" != "success" ]] || \
+             [[ "${{ needs.validate-manifests.result }}" != "success" ]]; then
+            echo "One or more CI jobs failed"
+            exit 1
+          fi
+          echo "All CI checks passed!"
