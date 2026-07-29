@@ -1,0 +1,335 @@
+name: CD — Build, Push to ECR & Deploy to EKS
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WHEN THIS RUNS:
+# ─────────────────────────────────────────────────────────────────────────────
+# ONLY after CI passes on main branch.
+# This is the production deployment pipeline — it pushes images to ECR
+# and triggers a rolling update on the EKS cluster.
+#
+# PIPELINE FLOW:
+#   Code merged to main
+#     → CI workflow passes (tests, scan, validation)
+#     → CD workflow triggers
+#       → Build production Docker images
+#       → Tag with git SHA (immutable, traceable)
+#       → Push to AWS ECR
+#       → Update EKS Deployments (rolling update)
+#       → Verify rollout status
+#
+# SECURITY: Uses GitHub OIDC (no stored AWS keys anywhere)
+# The IAM role is restricted to: Harshads-git/three-tier-eks-portfolio repo only
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  workflow_run:
+    workflows: ["CI — Build, Test & Scan"]
+    types: [completed]
+    branches: [main]
+    # Only run CD when CI has COMPLETED on main branch
+    # The 'if' condition below checks that CI actually succeeded (not just completed)
+
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Image tag to deploy (default: git SHA)"
+        required: false
+        default: ""
+
+# Cancel any in-progress deployment if a new one starts
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: false  # Never cancel deployments in progress (could leave cluster broken)
+
+# Required for OIDC authentication
+permissions:
+  id-token: write   # Allow requesting OIDC JWT token
+  contents: read    # Allow reading repository contents
+
+env:
+  AWS_REGION: us-east-1
+  CLUSTER_NAME: three-tier-eks-cluster
+  # IMAGE_TAG: set dynamically in the 'set-vars' job
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────
+  # JOB 1: CHECK CI STATUS (only run if CI succeeded)
+  # ─────────────────────────────────────────────────────────────────────────
+  check-ci:
+    name: Verify CI Passed
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    steps:
+      - name: CI status check
+        run: |
+          echo "CI workflow: ${{ github.event.workflow_run.conclusion || 'manual trigger' }}"
+          echo "Proceeding with deployment..."
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # JOB 2: SET DEPLOYMENT VARIABLES
+  # ─────────────────────────────────────────────────────────────────────────
+  set-vars:
+    name: Set Deployment Variables
+    runs-on: ubuntu-latest
+    needs: check-ci
+    outputs:
+      image_tag: ${{ steps.vars.outputs.image_tag }}
+      short_sha: ${{ steps.vars.outputs.short_sha }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set image tag
+        id: vars
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          # Use manual input if provided, otherwise use git SHA
+          IMAGE_TAG="${{ github.event.inputs.image_tag || format('sha-{0}', env.SHORT_SHA) }}"
+          # IMAGE_TAG example: sha-a1b2c3d
+          # This is an IMMUTABLE tag — matches our ECR IMMUTABLE setting
+          echo "image_tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+          echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
+          echo "Image tag: ${IMAGE_TAG}"
+        env:
+          SHORT_SHA: $(git rev-parse --short HEAD)
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # JOB 3: BUILD & PUSH BACKEND IMAGE TO ECR
+  # ─────────────────────────────────────────────────────────────────────────
+  push-backend:
+    name: Build & Push Backend Image
+    runs-on: ubuntu-latest
+    needs: set-vars
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC — no stored keys!)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          # This role was created in terraform/iam.tf
+          # Trust policy restricts it to: repo:Harshads-git/three-tier-eks-portfolio:*
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/three-tier-eks-cluster-github-actions-role
+          aws-region: ${{ env.AWS_REGION }}
+          # GitHub generates a short-lived OIDC JWT for this step
+          # AWS STS verifies it → returns temp credentials (1 hour max)
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+        # Runs: aws ecr get-login-password | docker login --password-stdin <ecr-registry>
+        # No password stored — token valid for 12 hours
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build & Push Backend
+        uses: docker/build-push-action@v5
+        with:
+          context: app/backend
+          file: app/backend/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.login-ecr.outputs.registry }}/three-tier-eks-cluster-backend:${{ needs.set-vars.outputs.image_tag }}
+            ${{ steps.login-ecr.outputs.registry }}/three-tier-eks-cluster-backend:latest
+          # TWO TAGS pushed:
+          #   sha-a1b2c3d: immutable, traceable to this exact commit (for rollback)
+          #   latest: convenience tag (always points to newest image)
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          # Layer caching: unchanged layers don't need to be re-uploaded
+
+      - name: Output image digest
+        run: |
+          echo "Backend image pushed:"
+          echo "  Tag: ${{ needs.set-vars.outputs.image_tag }}"
+          echo "  Registry: ${{ steps.login-ecr.outputs.registry }}"
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # JOB 4: BUILD & PUSH FRONTEND IMAGE TO ECR
+  # ─────────────────────────────────────────────────────────────────────────
+  push-frontend:
+    name: Build & Push Frontend Image
+    runs-on: ubuntu-latest
+    needs: set-vars
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/three-tier-eks-cluster-github-actions-role
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build & Push Frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: app/frontend
+          file: app/frontend/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.login-ecr.outputs.registry }}/three-tier-eks-cluster-frontend:${{ needs.set-vars.outputs.image_tag }}
+            ${{ steps.login-ecr.outputs.registry }}/three-tier-eks-cluster-frontend:latest
+          build-args: |
+            REACT_APP_BACKEND_URL=https://${{ secrets.ALB_DNS }}/api
+            # REACT_APP_BACKEND_URL is baked into the React build at this point.
+            # The ALB DNS is set as a GitHub Secret.
+            # When ALB DNS changes (rare), update the secret + rebuild the image.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # JOB 5: DEPLOY TO EKS (rolling update)
+  # ─────────────────────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy to EKS
+    runs-on: ubuntu-latest
+    needs: [set-vars, push-backend, push-frontend]
+    # Only deploy AFTER both images are successfully pushed to ECR
+
+    environment:
+      name: production
+      # GitHub Environments: add approval requirements here for production
+      # Settings: Settings → Environments → production → Required reviewers
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/three-tier-eks-cluster-github-actions-role
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Configure kubectl
+        run: |
+          aws eks update-kubeconfig \
+            --name ${{ env.CLUSTER_NAME }} \
+            --region ${{ env.AWS_REGION }}
+          kubectl cluster-info
+          # This adds/updates the kubeconfig for the EKS cluster.
+          # The OIDC role has eks:DescribeCluster permission to do this.
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Update backend image in EKS
+        run: |
+          BACKEND_IMAGE="${{ steps.login-ecr.outputs.registry }}/three-tier-eks-cluster-backend:${{ needs.set-vars.outputs.image_tag }}"
+
+          kubectl set image deployment/backend \
+            backend=${BACKEND_IMAGE} \
+            -n three-tier
+
+          echo "Backend deployment updated to: ${BACKEND_IMAGE}"
+          # kubectl set image: updates the container image in the Deployment spec
+          # This triggers a Rolling Update (maxSurge:1, maxUnavailable:0)
+
+      - name: Update frontend image in EKS
+        run: |
+          FRONTEND_IMAGE="${{ steps.login-ecr.outputs.registry }}/three-tier-eks-cluster-frontend:${{ needs.set-vars.outputs.image_tag }}"
+
+          kubectl set image deployment/frontend \
+            frontend=${FRONTEND_IMAGE} \
+            -n three-tier
+
+          echo "Frontend deployment updated to: ${FRONTEND_IMAGE}"
+
+      - name: Wait for backend rollout
+        run: |
+          kubectl rollout status deployment/backend \
+            -n three-tier \
+            --timeout=300s
+          # Waits up to 5 minutes for the rolling update to complete.
+          # If readinessProbe fails → rollout stalls → this command fails → deploy fails.
+          # Kubernetes automatically rolls back on failures when the probe is configured.
+
+      - name: Wait for frontend rollout
+        run: |
+          kubectl rollout status deployment/frontend \
+            -n three-tier \
+            --timeout=300s
+
+      - name: Verify deployment health
+        run: |
+          echo "=== Pod Status ==="
+          kubectl get pods -n three-tier
+
+          echo ""
+          echo "=== Backend Pods ==="
+          kubectl get pods -n three-tier -l app=backend -o wide
+
+          echo ""
+          echo "=== Frontend Pods ==="
+          kubectl get pods -n three-tier -l app=frontend -o wide
+
+          echo ""
+          echo "=== HPA Status ==="
+          kubectl get hpa -n three-tier
+
+          echo ""
+          echo "=== Ingress (ALB URL) ==="
+          kubectl get ingress three-tier-ingress -n three-tier
+
+      - name: Deployment summary
+        run: |
+          ALB_DNS=$(kubectl get ingress three-tier-ingress -n three-tier \
+            -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "not-ready")
+          echo "==================================================="
+          echo "  DEPLOYMENT SUCCESSFUL"
+          echo "==================================================="
+          echo "  Image tag:       ${{ needs.set-vars.outputs.image_tag }}"
+          echo "  Git commit:      ${{ github.sha }}"
+          echo "  Deployed by:     ${{ github.actor }}"
+          echo "  Application URL: http://${ALB_DNS}"
+          echo "  API endpoint:    http://${ALB_DNS}/api/tasks"
+          echo "==================================================="
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # JOB 6: NOTIFY ON FAILURE
+  # ─────────────────────────────────────────────────────────────────────────
+  notify-failure:
+    name: Notify on Failure
+    runs-on: ubuntu-latest
+    needs: [push-backend, push-frontend, deploy]
+    if: failure()
+
+    steps:
+      - name: Create GitHub Issue on deployment failure
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Deployment Failed: ${context.sha.substring(0, 7)}`,
+              body: `
+              ## Deployment Failed 🚨
+
+              **Commit:** ${context.sha}
+              **Branch:** ${context.ref}
+              **Triggered by:** ${context.actor}
+              **Workflow run:** ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}
+
+              ### Next Steps
+              1. Check the [workflow run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
+              2. If backend is broken: \`kubectl rollout undo deployment/backend -n three-tier\`
+              3. If frontend is broken: \`kubectl rollout undo deployment/frontend -n three-tier\`
+              `,
+              labels: ['deployment-failure', 'bug']
+            })
