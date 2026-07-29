@@ -1,0 +1,153 @@
+name: Terraform — Plan & Apply
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WHEN THIS RUNS:
+# ─────────────────────────────────────────────────────────────────────────────
+# - Pull requests touching terraform/: Run `terraform plan` and post results as PR comment
+# - Push to main (terraform/ changes): Run `terraform apply` automatically
+# - Manual trigger: workflow_dispatch for controlled applies
+#
+# DESIGN PATTERN: Plan on PR, Apply on merge
+#   PR → terraform plan → comment on PR → human review → merge → terraform apply
+#   This pattern ensures infrastructure changes are peer-reviewed BEFORE apply.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "terraform/**"
+      - ".github/workflows/terraform.yml"
+  push:
+    branches: [main]
+    paths:
+      - "terraform/**"
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Terraform action to run"
+        required: true
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
+
+permissions:
+  id-token: write       # OIDC token
+  contents: read        # Read repo files
+  pull-requests: write  # Post plan output as PR comment
+
+concurrency:
+  group: terraform-${{ github.ref }}
+  cancel-in-progress: false  # Never interrupt a running terraform apply
+
+env:
+  TF_VERSION: "1.7.5"
+  AWS_REGION: "us-east-1"
+  TF_WORKING_DIR: "./terraform"
+
+jobs:
+  terraform:
+    name: Terraform ${{ github.event_name == 'pull_request' && 'Plan' || 'Apply' }}
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          # Pins Terraform CLI version — prevents unexpected behavior from version upgrades
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/three-tier-eks-cluster-github-actions-role
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform Init
+        id: init
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=${{ secrets.TF_LOCK_TABLE }}"
+          # Backend config is injected at init time from GitHub Secrets
+          # This avoids hardcoding bucket names in terraform/main.tf
+
+      - name: Terraform Validate
+        id: validate
+        run: terraform validate -no-color
+        # Validates HCL syntax and provider schema correctness
+        # Runs FAST (no AWS API calls) — great first gate
+
+      - name: Terraform Format Check
+        id: fmt
+        run: terraform fmt -check -diff -recursive
+        # terraform fmt: auto-formats HCL files
+        # -check: exits non-zero if files would be reformatted
+        # -diff: shows what would change
+        continue-on-error: true  # Formatting issues are warnings, not blockers
+
+      - name: Terraform Plan
+        id: plan
+        run: |
+          terraform plan \
+            -var-file="../terraform/terraform.tfvars.example" \
+            -out=tfplan \
+            -no-color \
+            2>&1 | tee plan_output.txt
+        env:
+          TF_VAR_cluster_name: ${{ secrets.TF_CLUSTER_NAME || 'three-tier-eks-cluster' }}
+
+      - name: Post plan output as PR comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const planOutput = fs.readFileSync('terraform/plan_output.txt', 'utf8');
+            const truncated = planOutput.length > 65000
+              ? planOutput.substring(0, 65000) + '\n... (truncated)'
+              : planOutput;
+
+            const comment = `## Terraform Plan Results 📋
+
+            **Status:** ${{ steps.plan.outcome == 'success' && '✅ Success' || '❌ Failed' }}
+
+            <details>
+            <summary>Click to expand plan output</summary>
+
+            \`\`\`terraform
+            ${truncated}
+            \`\`\`
+            </details>
+
+            *Triggered by: @${{ github.actor }} on \`${{ github.head_ref }}\`*`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+      - name: Terraform Apply
+        if: github.event_name == 'push' || github.event.inputs.action == 'apply'
+        run: terraform apply -auto-approve tfplan
+        # Only applies on push to main (not PRs — PRs only plan)
+        # -auto-approve: no interactive confirmation (safe because plan was reviewed in PR)
+
+      - name: Terraform Destroy (manual only)
+        if: github.event.inputs.action == 'destroy'
+        run: |
+          echo "⚠️ TERRAFORM DESTROY — This will DELETE ALL infrastructure!"
+          terraform destroy -auto-approve \
+            -var-file="../terraform/terraform.tfvars.example"
