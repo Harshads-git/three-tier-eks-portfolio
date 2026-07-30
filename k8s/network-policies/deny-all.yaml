@@ -1,0 +1,72 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/network-policies/deny-all.yaml — Default Deny All Traffic
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# WHAT IS A NETWORK POLICY?
+# ─────────────────────────────────────────────────────────────────────────────
+# A NetworkPolicy is a K8s resource that controls which pods can communicate
+# with which other pods and external services (using iptables/eBPF rules).
+#
+# DEFAULT BEHAVIOR (without any NetworkPolicy):
+#   All pods can talk to all other pods in all namespaces.
+#   Pod in 'default' namespace → can reach MongoDB in 'three-tier' namespace.
+#   Compromised frontend pod → can directly query MongoDB (catastrophic!)
+#
+# WITH THIS DENY-ALL POLICY:
+#   Zero pod-to-pod traffic by default.
+#   Only explicitly ALLOWED traffic flows (via other NetworkPolicy rules).
+#   This is the "default deny, explicit allow" security model.
+#
+# ENFORCEMENT NOTE:
+# NetworkPolicy is enforced by the CNI (Container Network Interface) plugin.
+# EKS uses VPC CNI (aws-node DaemonSet). VPC CNI supports NetworkPolicy
+# ONLY when the NetworkPolicy addon is enabled (aws-eks-network-policy-agent).
+# Without the addon: NetworkPolicies are created but NOT enforced (silently ignored!)
+#
+# ENABLE NETWORK POLICY ENFORCEMENT IN EKS:
+#   aws eks update-addon \
+#     --cluster-name three-tier-eks-cluster \
+#     --addon-name vpc-cni \
+#     --configuration-values '{"enableNetworkPolicy": "true"}'
+#   OR add to terraform/eks.tf cluster_addons:
+#     vpc-cni = { configuration_values = jsonencode({ enableNetworkPolicy = "true" }) }
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+
+metadata:
+  name: default-deny-all
+  namespace: three-tier
+
+  labels:
+    app.kubernetes.io/name: default-deny-all
+    app.kubernetes.io/component: network-policy
+    app.kubernetes.io/part-of: three-tier-portfolio
+    policy-type: security-baseline
+
+  annotations:
+    description: >
+      Default deny-all ingress and egress policy for the three-tier namespace.
+      All pod-to-pod and pod-to-external traffic is blocked by default.
+      Specific traffic is allowed by separate, explicit NetworkPolicy resources.
+
+spec:
+  # podSelector: {} means this policy applies to ALL pods in the namespace
+  podSelector: {}
+
+  # policyTypes: List of traffic directions this policy affects
+  policyTypes:
+    - Ingress   # Controls incoming traffic TO pods
+    - Egress    # Controls outgoing traffic FROM pods
+
+  # No ingress rules → all incoming traffic is DENIED
+  # No egress rules  → all outgoing traffic is DENIED
+  #
+  # After applying this policy + the specific allow policies:
+  #   frontend → backend (allowed by allow-frontend-to-backend.yaml)
+  #   backend → mongodb (allowed by allow-backend-to-mongo.yaml)
+  #   pods → DNS (allowed by allow-dns-egress.yaml)
+  #   ALB → frontend (allowed by allow-alb-to-frontend.yaml)
+  #   ALB → backend (allowed by allow-alb-to-backend.yaml)
+  #   Everything else → DENIED

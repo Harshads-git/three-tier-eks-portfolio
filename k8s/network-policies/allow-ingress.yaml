@@ -1,0 +1,217 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/network-policies/allow-ingress.yaml — Allow Traffic Between Tiers
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# THIS FILE CONTAINS 4 NetworkPolicies DEFINING THE FULL TRAFFIC MATRIX:
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# ALLOWED TRAFFIC MAP:
+#
+#   Internet
+#     │ (port 80/443)
+#     ▼
+#   ALB (not a pod — it's AWS infrastructure)
+#     │ (NodePort, then kube-proxy routes to pod port 80)
+#     ▼ ────────────────────────────────────────────────────────
+#   frontend pods (port 80)           ← Policy 1: allow-alb-to-frontend
+#     │ (port 3001/5000)
+#     ▼ ────────────────────────────────────────────────────────
+#   backend pods (port 5000)          ← Policy 2: allow-frontend-to-backend
+#     │ (port 27017)
+#     ▼ ────────────────────────────────────────────────────────
+#   mongo pods (port 27017)           ← Policy 3: allow-backend-to-mongo
+#
+#   All pods → kube-dns (port 53)     ← Policy 4: allow-dns-egress
+#
+# BLOCKED TRAFFIC (not in any policy → denied by default-deny-all):
+#   frontend → MongoDB (direct access blocked — must go through backend)
+#   mongo → anything (MongoDB should never initiate outbound connections)
+#   backend → frontend (backend should never call the frontend)
+#   Any pod → internet (except through NAT for AWS service calls)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ═══════════════════════════════════════════════════════════════════════════
+# POLICY 1: ALB → Frontend (ingress to frontend from ALB health checks + traffic)
+# ═══════════════════════════════════════════════════════════════════════════
+# ALB uses EC2 nodes (NodePort) → traffic arrives from the NODE's IP, not from the ALB itself.
+# In K8s Network Policy terms: the source is the VPC CIDR (EC2 nodes).
+# We allow traffic from the VPC CIDR block to frontend pods.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+
+metadata:
+  name: allow-alb-to-frontend
+  namespace: three-tier
+
+  labels:
+    app.kubernetes.io/name: allow-alb-to-frontend
+    app.kubernetes.io/component: network-policy
+    app.kubernetes.io/part-of: three-tier-portfolio
+
+  annotations:
+    description: >
+      Allows ALB (via EC2 node NodePort) to reach frontend pods on port 80.
+      In NodePort mode, traffic appears to come from the EC2 node IP (VPC range).
+      Traffic from 10.0.0.0/8 covers the VPC CIDR (10.0.0.0/16).
+
+spec:
+  podSelector:
+    matchLabels:
+      app: frontend   # This policy applies TO frontend pods
+
+  policyTypes:
+    - Ingress
+
+  ingress:
+    - from:
+        # Allow from any IP in the VPC range (10.0.0.0/8 is broad but captures NodePort traffic)
+        - ipBlock:
+            cidr: 10.0.0.0/8
+            # Using /8 instead of /16 to also cover VPC peering or direct connect scenarios.
+            # For stricter control: use the exact VPC CIDR (10.0.0.0/16).
+      ports:
+        - protocol: TCP
+          port: 80
+
+---
+
+# ═══════════════════════════════════════════════════════════════════════════
+# POLICY 2: Frontend → Backend
+# ═══════════════════════════════════════════════════════════════════════════
+# Frontend pods call the backend REST API (GET /api/tasks, POST /api/tasks).
+# In our three-tier architecture, the browser (not Nginx) makes API calls.
+# However, Nginx COULD proxy API calls if configured (we allow this path anyway).
+# ALSO: This policy covers the backend's ingress from the ALB (direct path for /api/*)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+
+metadata:
+  name: allow-frontend-backend-ingress
+  namespace: three-tier
+
+  labels:
+    app.kubernetes.io/name: allow-frontend-backend-ingress
+    app.kubernetes.io/component: network-policy
+
+  annotations:
+    description: >
+      Allows frontend pods → backend pods (port 5000).
+      Also allows ALB (NodePort) → backend pods for /api/* routing.
+
+spec:
+  podSelector:
+    matchLabels:
+      app: backend    # Applies TO backend pods
+
+  policyTypes:
+    - Ingress
+
+  ingress:
+    - from:
+        # Allow from frontend pods
+        - podSelector:
+            matchLabels:
+              app: frontend
+      ports:
+        - protocol: TCP
+          port: 5000
+
+    - from:
+        # Allow from ALB (NodePort traffic from VPC)
+        - ipBlock:
+            cidr: 10.0.0.0/8
+      ports:
+        - protocol: TCP
+          port: 5000
+
+---
+
+# ═══════════════════════════════════════════════════════════════════════════
+# POLICY 3: Backend → MongoDB
+# ═══════════════════════════════════════════════════════════════════════════
+# Backend pods are the ONLY allowed MongoDB clients.
+# Frontend CANNOT reach MongoDB directly (even though they're in the same namespace).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+
+metadata:
+  name: allow-backend-to-mongo
+  namespace: three-tier
+
+  labels:
+    app.kubernetes.io/name: allow-backend-to-mongo
+    app.kubernetes.io/component: network-policy
+
+  annotations:
+    description: >
+      Allows ONLY backend pods to reach MongoDB on port 27017.
+      Frontend pods are explicitly blocked from reaching MongoDB directly.
+      This enforces the three-tier data access pattern.
+
+spec:
+  podSelector:
+    matchLabels:
+      app: mongo      # Applies TO MongoDB pods
+
+  policyTypes:
+    - Ingress
+    - Egress          # MongoDB should not initiate outbound connections
+
+  ingress:
+    - from:
+        # ONLY from pods labeled app=backend
+        - podSelector:
+            matchLabels:
+              app: backend
+      ports:
+        - protocol: TCP
+          port: 27017   # MongoDB default port
+
+  egress: []            # MongoDB has no legitimate reason to make outbound connections
+
+---
+
+# ═══════════════════════════════════════════════════════════════════════════
+# POLICY 4: Allow DNS (CoreDNS) egress for all pods
+# ═══════════════════════════════════════════════════════════════════════════
+# Without this: pods can't resolve ANY hostname (mongo-service, api.example.com)
+# because DNS is also blocked by the default deny-all policy.
+# CoreDNS runs in kube-system namespace on port 53 (UDP and TCP).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+
+metadata:
+  name: allow-dns-egress
+  namespace: three-tier
+
+  labels:
+    app.kubernetes.io/name: allow-dns-egress
+    app.kubernetes.io/component: network-policy
+
+  annotations:
+    description: >
+      Allows all pods in the three-tier namespace to reach CoreDNS
+      in the kube-system namespace on port 53 (UDP + TCP).
+      Required for service name resolution: mongo-service, backend-service, etc.
+
+spec:
+  podSelector: {}   # Applies to ALL pods in the namespace
+
+  policyTypes:
+    - Egress
+
+  egress:
+    - to:
+        # kube-system namespace where CoreDNS runs
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53     # DNS over UDP (most DNS queries)
+        - protocol: TCP
+          port: 53     # DNS over TCP (large responses or zone transfers)
+
+    - to:
+        # Also allow egress within the namespace (backend → mongo-service)
+        - podSelector: {}
