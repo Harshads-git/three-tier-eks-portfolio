@@ -1,0 +1,141 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/pdb/poddisruptionbudgets.yaml — PodDisruptionBudgets for HA
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# WHAT IS A PodDisruptionBudget (PDB)?
+# ─────────────────────────────────────────────────────────────────────────────
+# A PDB limits how many pods can be VOLUNTARILY disrupted at the same time.
+#
+# VOLUNTARY DISRUPTIONS (PDB applies):
+#   - `kubectl drain <node>` (node maintenance, rolling node upgrade)
+#   - Cluster Autoscaler evicting pods to scale down an underutilized node
+#   - Node group rolling update (AMI upgrade, K8s version upgrade)
+#   - `kubectl delete pod` (admin action)
+#
+# INVOLUNTARY DISRUPTIONS (PDB does NOT apply):
+#   - Node hardware failure (power loss, network partition)
+#   - OOMKill (pod exceeds memory limit)
+#   - Kernel panic, system crash
+#
+# WHY PDBs MATTER:
+# ─────────────────────────────────────────────────────────────────────────────
+# Scenario WITHOUT PDB:
+#   2 frontend pods running (pod1 on node-1, pod2 on node-2)
+#   Cluster Autoscaler decides to drain node-1 (low utilization)
+#   Drains node-1 → pod1 terminated → pod2 reschedules to node-2
+#   During rescheduling (30-60s): only 1 pod serving → reduced capacity
+#   K8s tries to evict pod2 from node-2 too → 0 pods → DOWNTIME!
+#
+# Scenario WITH PDB (minAvailable: 1):
+#   Autoscaler tries to drain node-1 → checks PDB → "removing pod1 leaves 1 pod available (≥1 min) ✓"
+#   pod1 evicted → pod2 still running → no downtime
+#   Autoscaler tries to drain node-2 → checks PDB → "removing pod2 leaves 0 pods (< 1 min) ✗"
+#   BLOCKED! node-2 cannot be drained until a new pod is scheduled elsewhere.
+#   New pod scheduled → node-2 drained safely.
+#
+# minAvailable vs maxUnavailable:
+#   minAvailable: N  → at least N pods must stay running during disruptions
+#   maxUnavailable: N → at most N pods can be disrupted at once
+#   (use one or the other, not both)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ═══════════════════════════════════════════════════════════════════════════
+# FRONTEND PDB — Nginx pods must have at least 1 available
+# ═══════════════════════════════════════════════════════════════════════════
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+
+metadata:
+  name: frontend-pdb
+  namespace: three-tier
+
+  labels:
+    app.kubernetes.io/name: frontend-pdb
+    app.kubernetes.io/component: pdb
+    app.kubernetes.io/part-of: three-tier-portfolio
+
+  annotations:
+    description: >
+      Ensures at least 1 frontend Nginx pod is always available during
+      voluntary disruptions (node drain, autoscaler scale-down, rolling upgrades).
+      With 2 replicas: only 1 can be disrupted at a time → always 1 serving.
+
+spec:
+  minAvailable: 1
+  # With replicas: 2 and minAvailable: 1:
+  #   Disruptions allowed: 2 - 1 = 1 pod at a time
+  #   During node drain: 1 pod taken down → 1 pod still serving users
+
+  selector:
+    matchLabels:
+      app: frontend    # Must match the Deployment's pod labels
+
+---
+
+# ═══════════════════════════════════════════════════════════════════════════
+# BACKEND PDB — Node.js API pods must have at least 1 available
+# ═══════════════════════════════════════════════════════════════════════════
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+
+metadata:
+  name: backend-pdb
+  namespace: three-tier
+
+  labels:
+    app.kubernetes.io/name: backend-pdb
+    app.kubernetes.io/component: pdb
+    app.kubernetes.io/part-of: three-tier-portfolio
+
+  annotations:
+    description: >
+      Ensures at least 1 backend Node.js pod is available during disruptions.
+      API requests continue to be served while other pods are evicted.
+
+spec:
+  minAvailable: 1
+
+  selector:
+    matchLabels:
+      app: backend
+
+---
+
+# ═══════════════════════════════════════════════════════════════════════════
+# MONGODB PDB — Database must always be available
+# ═══════════════════════════════════════════════════════════════════════════
+# MongoDB runs as a StatefulSet with 1 replica (single-node for portfolio).
+# With 1 replica and minAvailable: 1:
+#   NO voluntary eviction is allowed (1 - 1 = 0 disruptions allowed)
+#   This means: kubectl drain will WAIT until MongoDB is rescheduled elsewhere first.
+#   The drain will be BLOCKED until the operator manually resolves it.
+#
+# In production with a 3-node replica set: set minAvailable: 2 (allow 1 eviction at a time)
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+
+metadata:
+  name: mongo-pdb
+  namespace: three-tier
+
+  labels:
+    app.kubernetes.io/name: mongo-pdb
+    app.kubernetes.io/component: pdb
+    app.kubernetes.io/part-of: three-tier-portfolio
+
+  annotations:
+    description: >
+      Protects the MongoDB StatefulSet from voluntary disruptions.
+      With 1 replica: minAvailable=1 blocks ALL voluntary disruptions.
+      This is intentional — data loss risk is too high to allow eviction.
+      For production 3-node replica set: change to minAvailable: 2.
+
+spec:
+  minAvailable: 1
+  # With replicas: 1 and minAvailable: 1:
+  #   Disruptions allowed: 1 - 1 = 0 (no voluntary disruptions!)
+  #   kubectl drain will block until MongoDB is safely running elsewhere
+
+  selector:
+    matchLabels:
+      app: mongo
