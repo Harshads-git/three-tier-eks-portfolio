@@ -1,0 +1,163 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/resource-quota/quotas.yaml — ResourceQuota and LimitRange
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# TWO DIFFERENT GOVERNANCE RESOURCES:
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# ResourceQuota (namespace-level):
+#   Sets TOTAL limits across ALL pods in the namespace.
+#   Example: "The entire three-tier namespace cannot use more than 4 CPU total."
+#   Prevents one team's namespace from consuming the entire cluster.
+#
+# LimitRange (pod/container-level):
+#   Sets DEFAULT and MAX limits per individual container.
+#   Example: "Any container that doesn't set a CPU limit gets 500m by default."
+#   Prevents containers without resource specs from using unlimited resources.
+#
+# WHY BOTH?
+# ─────────────────────────────────────────────────────────────────────────────
+# ResourceQuota REQUIRES that every pod/container has resource requests+limits set.
+# If a pod doesn't have them → it cannot be created (quota can't calculate usage).
+# LimitRange provides those defaults → so ALL pods have requests+limits
+# even if developers forgot to set them.
+#
+# INTERACTION:
+#   Pod submitted without resource specs
+#     → LimitRange admission controller INJECTS defaults
+#     → Pod now has requests+limits
+#     → ResourceQuota check runs → allows or denies based on remaining quota
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ═══════════════════════════════════════════════════════════════════════════
+# RESOURCE QUOTA — Namespace-level total limits
+# ═══════════════════════════════════════════════════════════════════════════
+apiVersion: v1
+kind: ResourceQuota
+
+metadata:
+  name: three-tier-quota
+  namespace: three-tier
+
+  labels:
+    app.kubernetes.io/name: three-tier-quota
+    app.kubernetes.io/component: resource-governance
+    app.kubernetes.io/part-of: three-tier-portfolio
+
+  annotations:
+    description: >
+      Namespace-level resource quota for three-tier application.
+      Prevents this namespace from consuming the entire cluster.
+      Sized for 2 t3.medium nodes (2×4GiB=8GiB, 2×2vCPU=4000m).
+
+spec:
+  hard:
+    # ── COMPUTE ─────────────────────────────────────────────────────────────
+    # CPU requests total across all pods in namespace
+    requests.cpu: "2"
+    # All pods together: requests up to 2 vCPU
+    # Current usage: backend(100m×2) + frontend(50m×2) + mongo(250m) = 550m
+    # HPA max: backend(100m×5) + frontend(50m×5) + mongo(250m) = 1050m
+    # Buffer: 2000m - 1050m = 950m (safe headroom for autoscaler)
+
+    # CPU limits total
+    limits.cpu: "4"
+    # Allows CPU burst up to 4 vCPU (2× the requests — typical K8s ratio)
+    # Prevents: runaway Node.js processes from consuming all cluster CPU
+
+    # Memory requests total
+    requests.memory: "1Gi"
+    # backend(128Mi×2) + frontend(64Mi×2) + mongo(256Mi) = 640Mi
+    # HPA max: backend(128Mi×5) + frontend(64Mi×5) + mongo(256Mi) = 1.2Gi
+    # Slightly over limit at HPA max — adjust if needed
+
+    limits.memory: "2Gi"
+    # Total memory limit for all pods in namespace
+    # 2 GiB is 50% of t3.medium capacity (4 GiB), leaving room for kube-system
+
+    # ── OBJECT COUNTS ────────────────────────────────────────────────────────
+    # Maximum number of Pods
+    pods: "20"
+    # HPA max: backend(5) + frontend(5) + mongo(1) = 11 pods
+    # 20 provides headroom for rolling updates (old + new pods coexist briefly)
+
+    # Maximum number of Services
+    services: "10"
+
+    # Maximum number of PersistentVolumeClaims
+    persistentvolumeclaims: "5"
+    # MongoDB: 1 PVC. Space for future DB replicas.
+
+    # Maximum number of Secrets
+    secrets: "10"
+    # Currently: 1 (mongo-secret). Space for future TLS, API key secrets.
+
+    # Maximum number of ConfigMaps
+    configmaps: "10"
+    # Currently: 1 (backend-config). Space for future configs.
+
+    # ── LOAD BALANCER SERVICES ────────────────────────────────────────────────
+    # Limit LoadBalancer type Services (each creates an AWS NLB = expensive!)
+    services.loadbalancers: "0"
+    # NONE allowed — we use Ingress + ALB Controller instead.
+    # If someone accidentally creates a LoadBalancer service → blocked!
+    # This prevents accidental AWS NLB creation ($18+/month per NLB)
+
+    # NodePort services are fine (used by frontend-service for ALB)
+    services.nodeports: "3"
+
+---
+
+# ═══════════════════════════════════════════════════════════════════════════
+# LIMIT RANGE — Default and max limits per container
+# ═══════════════════════════════════════════════════════════════════════════
+apiVersion: v1
+kind: LimitRange
+
+metadata:
+  name: three-tier-limits
+  namespace: three-tier
+
+  labels:
+    app.kubernetes.io/name: three-tier-limits
+    app.kubernetes.io/component: resource-governance
+    app.kubernetes.io/part-of: three-tier-portfolio
+
+  annotations:
+    description: >
+      Default resource requests/limits for containers that don't specify them.
+      Also enforces maximum limits to prevent runaway resource consumption.
+
+spec:
+  limits:
+    # ── CONTAINER DEFAULTS ──────────────────────────────────────────────────
+    - type: Container
+      # defaultRequest: Injected if container has no requests set
+      defaultRequest:
+        cpu: "100m"      # 100 millicores = 10% of 1 vCPU
+        memory: "128Mi"
+
+      # default: Injected if container has no limits set
+      default:
+        cpu: "500m"
+        memory: "256Mi"
+
+      # max: No single container can exceed these values
+      max:
+        cpu: "1"         # 1 full vCPU max per container
+        memory: "512Mi"  # 512 MiB max per container
+        # MongoDB requests 250m CPU and 256Mi memory — well within max.
+        # Backend requests 100m CPU and 128Mi memory — within max.
+
+      # min: No container can request less than these values
+      min:
+        cpu: "10m"       # At least 10 millicores requested
+        memory: "16Mi"   # At least 16 MiB requested
+
+    # ── PVC SIZE LIMITS ──────────────────────────────────────────────────────
+    - type: PersistentVolumeClaim
+      max:
+        storage: "10Gi"  # No single PVC larger than 10 GiB
+        # MongoDB PVC: 5 GiB — within limit
+      min:
+        storage: "1Gi"   # No PVC smaller than 1 GiB (too small to be useful)
