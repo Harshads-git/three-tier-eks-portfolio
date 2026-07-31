@@ -1,0 +1,190 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/monitoring/servicemonitors.yaml — Prometheus ServiceMonitors
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# WHAT IS A SERVICEMONITOR?
+# ─────────────────────────────────────────────────────────────────────────────
+# A ServiceMonitor is a CRD (Custom Resource Definition) provided by the
+# Prometheus Operator. It tells Prometheus HOW and WHERE to scrape metrics.
+#
+# Without ServiceMonitor: Prometheus doesn't know your app exists.
+# With ServiceMonitor: Prometheus scrapes /metrics from your pod every 30s.
+#
+# SCRAPING FLOW:
+#   ServiceMonitor → Prometheus Operator watches it
+#     → Operator updates Prometheus config
+#       → Prometheus scrapes: http://<pod-ip>:<port>/metrics every 30s
+#         → Metrics stored in time-series DB
+#           → Grafana queries Prometheus → displays dashboards
+#
+# METRICS ENDPOINT SETUP:
+# ─────────────────────────────────────────────────────────────────────────────
+# Backend (Node.js): Add 'prom-client' npm package to expose /metrics
+#   const promClient = require('prom-client');
+#   promClient.collectDefaultMetrics(); // CPU, memory, event loop, etc.
+#   app.get('/metrics', (req, res) => {
+#     res.set('Content-Type', promClient.register.contentType);
+#     res.end(await promClient.register.metrics());
+#   });
+#
+# Frontend (Nginx): Nginx stub_status exposes basic metrics at /nginx-status
+#   nginx-prometheus-exporter sidecar converts stub_status to Prometheus format
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ═══════════════════════════════════════════════════════════════════════════
+# BACKEND SERVICEMONITOR
+# ═══════════════════════════════════════════════════════════════════════════
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+
+metadata:
+  name: backend-monitor
+  namespace: three-tier
+  # ServiceMonitor lives in the same namespace as the app
+  # Prometheus discovers it because serviceMonitorNamespaceSelector: {} in values
+
+  labels:
+    app: backend
+    app.kubernetes.io/name: backend-monitor
+    app.kubernetes.io/component: monitoring
+    app.kubernetes.io/part-of: three-tier-portfolio
+    release: kube-prometheus-stack  # Must match Prometheus Operator's serviceMonitorSelector
+
+  annotations:
+    description: >
+      Configures Prometheus to scrape metrics from backend Node.js pods.
+      Requires prom-client package and /metrics endpoint in the backend app.
+
+spec:
+  # selector: Finds Services matching these labels to scrape
+  selector:
+    matchLabels:
+      app: backend
+      # This matches the backend-service labels from k8s/backend/service.yaml
+
+  # namespaceSelector: Which namespaces to look for the matching Service
+  namespaceSelector:
+    matchNames:
+      - three-tier
+
+  endpoints:
+    - port: http
+      # 'http' must match a named port in the backend Service spec
+      # backend-service exposes port 3001 named 'http'
+
+      path: /metrics
+      # Node.js backend exposes Prometheus metrics at this path
+      # via prom-client: app.get('/metrics', ...)
+
+      interval: 30s
+      # Scrape every 30 seconds — standard for application metrics
+      # Lower = more data, higher cardinality, more storage needed
+
+      scrapeTimeout: 10s
+      # Timeout for each scrape request
+      # Must be less than interval (30s)
+
+      # Honor labels from the target (app, pod name, etc.)
+      honorLabels: false
+      # false = Prometheus adds its own labels, doesn't use target's labels for conflicts
+
+---
+
+# ═══════════════════════════════════════════════════════════════════════════
+# FRONTEND SERVICEMONITOR
+# ═══════════════════════════════════════════════════════════════════════════
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+
+metadata:
+  name: frontend-monitor
+  namespace: three-tier
+
+  labels:
+    app: frontend
+    app.kubernetes.io/name: frontend-monitor
+    app.kubernetes.io/component: monitoring
+    app.kubernetes.io/part-of: three-tier-portfolio
+    release: kube-prometheus-stack
+
+  annotations:
+    description: >
+      Configures Prometheus to scrape Nginx metrics from frontend pods.
+      Uses the /nginx-status endpoint (stub_status) or a Prometheus exporter sidecar.
+
+spec:
+  selector:
+    matchLabels:
+      app: frontend
+
+  namespaceSelector:
+    matchNames:
+      - three-tier
+
+  endpoints:
+    - port: http
+      path: /nginx-health
+      # /nginx-health returns 200 OK — used for availability check
+      # For full Nginx metrics: add nginx-prometheus-exporter sidecar
+      # nginx-prometheus-exporter converts stub_status to Prometheus format
+
+      interval: 30s
+      scrapeTimeout: 10s
+
+      # metricRelabelings: Transform metrics before storing
+      # Useful for: dropping high-cardinality labels, renaming metrics
+      metricRelabelings:
+        - action: drop
+          regex: "nginx_http_requests_total"
+          sourceLabels: [__name__]
+          # Example: drop a specific metric to control cardinality
+          # Remove this in production if you need this metric
+
+---
+
+# ═══════════════════════════════════════════════════════════════════════════
+# MONGODB PODMONITOR (pod-level, not service-level)
+# ═══════════════════════════════════════════════════════════════════════════
+# MongoDB doesn't natively expose Prometheus metrics.
+# Option 1: Add mongodb_exporter sidecar to the StatefulSet
+# Option 2: Use PodMonitor to scrape the exporter sidecar
+# We define the PodMonitor here; the sidecar would be added to the StatefulSet
+# when mongodb_exporter is integrated.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+
+metadata:
+  name: mongo-monitor
+  namespace: three-tier
+
+  labels:
+    app: mongo
+    app.kubernetes.io/name: mongo-monitor
+    app.kubernetes.io/component: monitoring
+    app.kubernetes.io/part-of: three-tier-portfolio
+    release: kube-prometheus-stack
+
+  annotations:
+    description: >
+      PodMonitor for MongoDB metrics via mongodb_exporter sidecar (port 9216).
+      To activate: add percona/mongodb_exporter container to the StatefulSet:
+        - name: mongodb-exporter
+          image: percona/mongodb_exporter:0.40
+          ports: [{name: exporter, containerPort: 9216}]
+          env: [{name: MONGODB_URI, valueFrom: {secretKeyRef: ...}}]
+
+spec:
+  selector:
+    matchLabels:
+      app: mongo
+
+  namespaceSelector:
+    matchNames:
+      - three-tier
+
+  podMetricsEndpoints:
+    - port: exporter
+      # 'exporter' = named port on the mongodb-exporter sidecar container
+      path: /metrics
+      interval: 60s       # MongoDB metrics change slowly — 60s is fine
+      scrapeTimeout: 15s
