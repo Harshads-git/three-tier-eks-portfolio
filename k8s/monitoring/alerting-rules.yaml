@@ -1,0 +1,269 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/monitoring/alerting-rules.yaml — PrometheusRule: Custom Alert Rules
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# WHAT IS A PrometheusRule?
+# ─────────────────────────────────────────────────────────────────────────────
+# A PrometheusRule is a CRD from the Prometheus Operator.
+# It defines:
+#   1. Recording Rules: Pre-compute expensive queries for dashboard performance
+#   2. Alert Rules:     Define conditions that trigger alerts to AlertManager
+#
+# ALERT LIFECYCLE:
+#   Prometheus evaluates rule every 1-2 minutes
+#     → Condition true? → Alert enters "pending" state (for 'for' duration)
+#       → Still true after 'for'? → Alert "fires" → sent to AlertManager
+#         → AlertManager routes to: Slack, email, PagerDuty, webhook
+#           → Condition false? → Alert "resolves" → resolution notification sent
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+
+metadata:
+  name: three-tier-alerts
+  namespace: three-tier
+
+  labels:
+    app.kubernetes.io/name: three-tier-alerts
+    app.kubernetes.io/component: monitoring
+    app.kubernetes.io/part-of: three-tier-portfolio
+    release: kube-prometheus-stack   # Must match Prometheus Operator's ruleSelector
+
+  annotations:
+    description: >
+      Custom alert rules for the three-tier application.
+      Alerts on: pod crashes, high CPU, high memory, MongoDB disk, HPA limits.
+
+spec:
+  groups:
+    # ─────────────────────────────────────────────────────────────────────
+    # GROUP 1: POD AVAILABILITY ALERTS
+    # ─────────────────────────────────────────────────────────────────────
+    - name: three-tier.pods
+      interval: 60s   # Evaluate rules in this group every 60 seconds
+
+      rules:
+        # ── ALERT: Pod Crash Looping ───────────────────────────────────────
+        - alert: PodCrashLooping
+          expr: |
+            rate(kube_pod_container_status_restarts_total{
+              namespace="three-tier"
+            }[5m]) * 300 > 2
+          # Math: restart rate over 5 minutes × 300 seconds = restarts per 5 min
+          # Alert if: more than 2 restarts in 5 minutes
+          for: 5m
+          # 'for': Alert must be true for 5 minutes before firing
+          # Prevents: brief restart spikes from causing false alerts
+          labels:
+            severity: critical
+            namespace: three-tier
+          annotations:
+            summary: "Pod {{ $labels.pod }} is crash looping"
+            description: >
+              Pod {{ $labels.namespace }}/{{ $labels.pod }} container
+              {{ $labels.container }} is restarting {{ $value | printf "%.2f" }}
+              times per 5 minutes. Check logs:
+              kubectl logs {{ $labels.pod }} -n {{ $labels.namespace }} --previous
+            runbook: "https://github.com/Harshads-git/three-tier-eks-portfolio/blob/main/docs/runbook.md#pod-crash-looping"
+
+        # ── ALERT: Pod Not Ready ───────────────────────────────────────────
+        - alert: PodNotReady
+          expr: |
+            kube_pod_status_ready{
+              namespace="three-tier",
+              condition="true"
+            } == 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Pod {{ $labels.pod }} is not ready"
+            description: >
+              Pod {{ $labels.namespace }}/{{ $labels.pod }} has not been ready
+              for 5 minutes. Check events:
+              kubectl describe pod {{ $labels.pod }} -n {{ $labels.namespace }}
+
+        # ── ALERT: Deployment Replica Mismatch ────────────────────────────
+        - alert: DeploymentReplicasMismatch
+          expr: |
+            kube_deployment_status_replicas_available{namespace="three-tier"}
+            <
+            kube_deployment_spec_replicas{namespace="three-tier"}
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Deployment {{ $labels.deployment }} has fewer replicas than desired"
+            description: >
+              Deployment {{ $labels.namespace }}/{{ $labels.deployment }}
+              has {{ $value }} available replicas, expected
+              {{ "kube_deployment_spec_replicas" | query | first | value }}.
+              Check: kubectl rollout status deployment/{{ $labels.deployment }} -n three-tier
+
+    # ─────────────────────────────────────────────────────────────────────
+    # GROUP 2: RESOURCE UTILIZATION ALERTS
+    # ─────────────────────────────────────────────────────────────────────
+    - name: three-tier.resources
+      interval: 60s
+
+      rules:
+        # ── ALERT: High CPU Utilization ───────────────────────────────────
+        - alert: HighCPUUtilization
+          expr: |
+            (
+              sum(rate(container_cpu_usage_seconds_total{
+                namespace="three-tier",
+                container!="",
+                container!="POD"
+              }[5m])) by (pod, container)
+              /
+              sum(kube_pod_container_resource_limits{
+                namespace="three-tier",
+                resource="cpu"
+              }) by (pod, container)
+            ) * 100 > 85
+          # Alert if: CPU usage > 85% of CPU limit for 10 minutes
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High CPU on {{ $labels.pod }}/{{ $labels.container }}"
+            description: >
+              Container {{ $labels.container }} in pod {{ $labels.pod }}
+              is using {{ $value | printf "%.1f" }}% of its CPU limit.
+              Consider scaling up or optimizing.
+
+        # ── ALERT: High Memory Utilization ────────────────────────────────
+        - alert: HighMemoryUtilization
+          expr: |
+            (
+              sum(container_memory_working_set_bytes{
+                namespace="three-tier",
+                container!="",
+                container!="POD"
+              }) by (pod, container)
+              /
+              sum(kube_pod_container_resource_limits{
+                namespace="three-tier",
+                resource="memory"
+              }) by (pod, container)
+            ) * 100 > 90
+          for: 5m
+          labels:
+            severity: critical
+            # Critical: 90% memory → OOMKill imminent (Linux OOMKills at ~95%)
+          annotations:
+            summary: "Critical memory usage on {{ $labels.pod }}"
+            description: >
+              Container {{ $labels.container }} in pod {{ $labels.pod }}
+              is using {{ $value | printf "%.1f" }}% of its memory limit.
+              OOMKill may occur. Check:
+              kubectl top pod {{ $labels.pod }} -n three-tier
+
+        # ── ALERT: HPA at Maximum Replicas ────────────────────────────────
+        - alert: HPAAtMaxReplicas
+          expr: |
+            kube_horizontalpodautoscaler_status_current_replicas{
+              namespace="three-tier"
+            }
+            >=
+            kube_horizontalpodautoscaler_spec_max_replicas{
+              namespace="three-tier"
+            }
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "HPA {{ $labels.horizontalpodautoscaler }} is at max replicas"
+            description: >
+              HPA {{ $labels.horizontalpodautoscaler }} has been at maximum
+              replicas ({{ $value }}) for 15 minutes.
+              Application may be under-provisioned. Consider:
+              1. Increasing maxReplicas in the HPA spec
+              2. Increasing node_max_size in Terraform variables
+              3. Optimizing application performance
+
+    # ─────────────────────────────────────────────────────────────────────
+    # GROUP 3: STORAGE ALERTS
+    # ─────────────────────────────────────────────────────────────────────
+    - name: three-tier.storage
+      interval: 300s  # Check every 5 minutes (storage changes slowly)
+
+      rules:
+        # ── ALERT: MongoDB PVC Running Low ────────────────────────────────
+        - alert: MongoDBDiskRunningLow
+          expr: |
+            (
+              kubelet_volume_stats_available_bytes{
+                namespace="three-tier",
+                persistentvolumeclaim=~"mongo-data-.*"
+              }
+              /
+              kubelet_volume_stats_capacity_bytes{
+                namespace="three-tier",
+                persistentvolumeclaim=~"mongo-data-.*"
+              }
+            ) * 100 < 20
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "MongoDB PVC is {{ $value | printf \"%.1f\" }}% free"
+            description: >
+              MongoDB PersistentVolumeClaim has less than 20% free space.
+              Current free: {{ $value | printf "%.1f" }}%.
+              Action: kubectl patch pvc mongo-data-mongo-0 -n three-tier \
+                --patch '{"spec": {"resources": {"requests": {"storage": "10Gi"}}}}'
+              (requires storageClass with allowVolumeExpansion: true)
+
+        - alert: MongoDBDiskCritical
+          expr: |
+            (
+              kubelet_volume_stats_available_bytes{
+                namespace="three-tier",
+                persistentvolumeclaim=~"mongo-data-.*"
+              }
+              /
+              kubelet_volume_stats_capacity_bytes{
+                namespace="three-tier",
+                persistentvolumeclaim=~"mongo-data-.*"
+              }
+            ) * 100 < 5
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "CRITICAL: MongoDB disk almost full ({{ $value | printf \"%.1f\" }}% free)"
+            description: >
+              MongoDB is almost out of disk space!
+              Immediate action required to prevent data loss.
+
+    # ─────────────────────────────────────────────────────────────────────
+    # GROUP 4: RECORDING RULES (pre-computed for dashboard performance)
+    # ─────────────────────────────────────────────────────────────────────
+    - name: three-tier.recording
+      interval: 60s
+
+      rules:
+        # Pre-compute: average request rate per backend pod
+        - record: three_tier:backend_request_rate:5m
+          expr: |
+            sum(rate(http_requests_total{
+              namespace="three-tier",
+              job="backend"
+            }[5m])) by (method, status_code)
+
+        # Pre-compute: backend error rate (4xx + 5xx)
+        - record: three_tier:backend_error_rate:5m
+          expr: |
+            sum(rate(http_requests_total{
+              namespace="three-tier",
+              job="backend",
+              status_code=~"[45].."
+            }[5m]))
+            /
+            sum(rate(http_requests_total{
+              namespace="three-tier",
+              job="backend"
+            }[5m]))
