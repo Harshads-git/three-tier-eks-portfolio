@@ -1,0 +1,234 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/monitoring/prometheus-stack-values.yaml
+# Helm values for kube-prometheus-stack (Prometheus + Grafana + AlertManager)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# WHAT IS kube-prometheus-stack?
+# ─────────────────────────────────────────────────────────────────────────────
+# A single Helm chart that installs the full Kubernetes monitoring stack:
+#   - Prometheus Operator     → manages Prometheus instances via CRDs
+#   - Prometheus              → time-series metrics database
+#   - Grafana                 → visualization dashboards
+#   - AlertManager            → alert routing (email, Slack, PagerDuty)
+#   - Node Exporter           → EC2 node metrics (CPU, memory, disk, network)
+#   - kube-state-metrics      → K8s object metrics (pod status, replicas, etc.)
+#   - Prometheus Adapter      → exposes metrics to K8s Metrics API (for HPA)
+#
+# INSTALL COMMAND (run after terraform apply creates the EKS cluster):
+# ─────────────────────────────────────────────────────────────────────────────
+# helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+# helm repo update
+# helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+#   --namespace monitoring \
+#   --create-namespace \
+#   --values k8s/monitoring/prometheus-stack-values.yaml \
+#   --version 58.4.0
+#
+# ACCESS GRAFANA (port-forward while cluster exists):
+#   kubectl port-forward svc/kube-prometheus-stack-grafana 3000:80 -n monitoring
+#   Open: http://localhost:3000
+#   Default credentials: admin / <from secret below>
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ═══════════════════════════════════════════════════════════════════════════
+# GRAFANA CONFIGURATION
+# ═══════════════════════════════════════════════════════════════════════════
+grafana:
+  enabled: true
+
+  # Admin credentials
+  adminUser: admin
+  adminPassword: "ThreeTierPortfolio2024!"
+  # In production: use grafana.adminPassword: "" and provide via K8s secret
+  # kubectl create secret generic grafana-admin \
+  #   --from-literal=admin-password=<strong-password> -n monitoring
+
+  # Persistence: Save dashboard configs across pod restarts
+  persistence:
+    enabled: true
+    storageClassName: gp2   # EBS volume (requires EBS CSI driver from Day 10)
+    size: 2Gi
+
+  # Grafana INI configuration
+  grafana.ini:
+    server:
+      root_url: "%(protocol)s://%(domain)s:%(http_port)s/grafana"
+    auth.anonymous:
+      enabled: false          # Require login (don't expose dashboards publicly)
+    analytics:
+      reporting_enabled: false # Don't send usage data to Grafana Labs
+
+  # Pre-configure the Prometheus data source automatically
+  additionalDataSources:
+    - name: Prometheus
+      type: prometheus
+      url: http://kube-prometheus-stack-prometheus:9090
+      access: proxy
+      isDefault: true
+
+  # Pre-load dashboards from ConfigMaps (our custom dashboard - Day 14 C1)
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      labelValue: "1"
+      # Grafana sidecar watches for ConfigMaps with this label
+      # Automatically loads them as dashboards without restart
+
+  # Dashboard providers
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+        - name: "three-tier"
+          orgId: 1
+          folder: "Three Tier App"
+          type: file
+          disableDeletion: false
+          options:
+            path: /var/lib/grafana/dashboards/three-tier
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PROMETHEUS CONFIGURATION
+# ═══════════════════════════════════════════════════════════════════════════
+prometheus:
+  enabled: true
+
+  prometheusSpec:
+    # Retention: Keep 30 days of metrics data
+    retention: 30d
+    retentionSize: "10GB"
+
+    # Storage for Prometheus metrics data
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: gp2
+          resources:
+            requests:
+              storage: 10Gi
+    # 10 GiB EBS volume stores ~30 days of metrics for a small cluster
+
+    # ServiceMonitor discovery: monitor ALL namespaces (not just monitoring)
+    # This allows ServiceMonitors in 'three-tier' namespace to be discovered
+    serviceMonitorNamespaceSelector: {}   # {} = all namespaces
+    serviceMonitorSelector: {}            # {} = all ServiceMonitors
+    podMonitorNamespaceSelector: {}
+    podMonitorSelector: {}
+    ruleNamespaceSelector: {}             # {} = all PrometheusRule resources
+    ruleSelector: {}
+
+    # Resources for Prometheus pods
+    resources:
+      requests:
+        memory: 400Mi
+        cpu: 100m
+      limits:
+        memory: 1Gi
+        cpu: 500m
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ALERTMANAGER CONFIGURATION
+# ═══════════════════════════════════════════════════════════════════════════
+alertmanager:
+  enabled: true
+
+  config:
+    global:
+      resolve_timeout: 5m
+
+    route:
+      group_by: ["alertname", "namespace"]
+      group_wait: 30s       # Wait 30s before sending first alert (batch similar alerts)
+      group_interval: 5m    # Wait 5min between alert updates
+      repeat_interval: 12h  # Resend unresolved alerts every 12 hours
+      receiver: "null"      # Default: discard (set up real receiver for production)
+
+      routes:
+        # Critical alerts → immediate notification
+        - match:
+            severity: critical
+          receiver: critical-alerts
+          continue: false
+
+        # Warning alerts → less urgent
+        - match:
+            severity: warning
+          receiver: warning-alerts
+          continue: false
+
+    receivers:
+      - name: "null"
+        # Discard all alerts (placeholder for development)
+
+      - name: critical-alerts
+        # For production: configure Slack, PagerDuty, email
+        # slack_configs:
+        #   - api_url: "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK"
+        #     channel: "#alerts-critical"
+        #     title: "CRITICAL: {{ .GroupLabels.alertname }}"
+        #     text: "{{ range .Alerts }}{{ .Annotations.description }}{{ end }}"
+
+      - name: warning-alerts
+        # webhook_configs:
+        #   - url: "https://your-webhook-endpoint"
+
+  alertmanagerSpec:
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: gp2
+          resources:
+            requests:
+              storage: 2Gi
+
+# ═══════════════════════════════════════════════════════════════════════════
+# NODE EXPORTER — EC2 Node Metrics
+# ═══════════════════════════════════════════════════════════════════════════
+nodeExporter:
+  enabled: true
+  # Runs as a DaemonSet (one pod per EC2 node)
+  # Exposes: CPU, memory, disk I/O, network, load average, file descriptors
+
+# ═══════════════════════════════════════════════════════════════════════════
+# KUBE-STATE-METRICS — Kubernetes Object Metrics
+# ═══════════════════════════════════════════════════════════════════════════
+kubeStateMetrics:
+  enabled: true
+  # Exposes:
+  #   kube_pod_status_ready{namespace="three-tier", pod="backend-xxx"} = 1
+  #   kube_deployment_status_replicas_available{deployment="backend"} = 2
+  #   kube_horizontalpodautoscaler_status_current_replicas{hpa="backend-hpa"} = 3
+  #   kube_persistentvolumeclaim_status_phase{pvc="mongo-data-mongo-0"} = "Bound"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# DEFAULT RULES
+# ═══════════════════════════════════════════════════════════════════════════
+defaultRules:
+  create: true
+  rules:
+    alertmanager: true
+    etcd: false           # We don't have access to etcd in managed EKS
+    configReloaders: true
+    general: true
+    k8s: true
+    kubeApiserverAvailability: true
+    kubeApiserverBurnrate: true
+    kubeApiserverHistogram: true
+    kubeApiserverSlos: true
+    kubeControllerManager: false  # Not exposed in managed EKS
+    kubelet: true
+    kubeProxy: false              # Managed by EKS
+    kubePrometheusGeneral: true
+    kubePrometheusNodeRecording: true
+    kubernetesApps: true          # Pod crash, OOMKill, restart alerts
+    kubernetesResources: true     # CPU/memory limits exceeded alerts
+    kubernetesStorage: true       # PVC near capacity alerts
+    kubernetesSystem: true
+    kubeSchedulerAlerting: false  # Not exposed in managed EKS
+    kubeStateMetrics: true
+    network: true
+    node: true                    # EC2 node CPU/memory/disk alerts
+    nodeExporterAlerting: true
+    nodeExporterRecording: true
+    prometheus: true
