@@ -1,120 +1,183 @@
 # Contributing to Three-Tier EKS Portfolio
 
-Thank you for your interest in contributing! This document outlines the workflow and standards for contributing to this project.
+Thank you for considering contributing to this project! This guide covers the development workflow, coding standards, and PR process.
 
 ---
 
-## 🌿 Branching Strategy
+## Development Setup
 
-We follow a **GitFlow-inspired** branching model:
-
-```
-main          ← Always production-ready
-develop       ← Integration branch (merge features here)
-feature/*     ← New features and daily development work
-fix/*         ← Bug fixes
-docs/*        ← Documentation updates
-```
-
-### Creating a Branch
+### Prerequisites
 
 ```bash
-# Always branch from develop (not main)
-git checkout develop
-git pull origin develop
-git checkout -b feature/day-X-description
+# Install required tools
+brew install awscli terraform kubectl helm k6
+# or on Ubuntu/Debian:
+# apt-get install awscli kubectl helm
+# snap install terraform --classic
 
-# Example:
-git checkout -b feature/day-6-backend-dockerfile
+# Install Node.js 18+
+nvm install 18
+nvm use 18
+
+# Verify all tools
+aws --version && terraform --version && kubectl version --client && helm version
 ```
 
----
-
-## 💬 Commit Message Convention
-
-This project follows the **Conventional Commits** specification.
-
-```
-<type>(<scope>): <description>
-
-Body (optional):
-Explain WHY the change was made, not WHAT (the code shows that).
-
-Footer (optional):
-Refs: #issue-number
-```
-
-### Types
-
-| Type | When to Use |
-|---|---|
-| `feat` | New feature or file |
-| `fix` | Bug fix |
-| `docs` | Documentation changes only |
-| `chore` | Non-production code changes (gitignore, config) |
-| `refactor` | Code restructuring without behavior change |
-| `test` | Adding or modifying tests |
-| `ci` | CI/CD pipeline changes |
-| `release` | Version tag commits |
-
-### Good Commit Message Examples
+### Local Development (without cluster)
 
 ```bash
-# Good ✅
-feat(backend): add health check endpoint for Kubernetes probes
-docs(vpc): add network topology diagram for multi-AZ design
-chore(terraform): run fmt and validate all tf files
-fix(frontend): correct API base URL in nginx config
+# Clone the repo
+git clone https://github.com/Harshads-git/three-tier-eks-portfolio.git
+cd three-tier-eks-portfolio
 
-# Bad ❌
-update stuff
-fix bug
-changes
-wip
+# Run app locally with Docker Compose
+# (Docker Compose file runs: frontend + backend + MongoDB)
+docker compose up -d
+
+# Test backend API
+curl http://localhost:5000/api/health
+curl http://localhost:5000/api/tasks
+
+# Access frontend
+open http://localhost:3000
 ```
 
 ---
 
-## 🔄 Pull Request Process
+## Project Standards
 
-1. **Create your branch** from `develop`
-2. **Make your changes** with atomic, well-described commits
-3. **Push your branch**: `git push origin feature/your-branch`
-4. **Open a PR** against `develop` (not `main`)
-5. **Fill the PR template** — describe what changed and why
-6. **Ensure CI passes** — all GitHub Actions checks must be green
-7. **Request a review** if applicable
+### Git Commit Convention
+
+All commits MUST follow this format:
+
+```
+<type>: <description in lowercase>
+
+<body explaining the WHY and key decisions>
+```
+
+**Types:**
+- `feat:` — New feature or resource
+- `fix:` — Bug fix
+- `docs:` — Documentation only
+- `refactor:` — Code change that neither fixes a bug nor adds a feature
+- `test:` — Adding or updating tests
+- `chore:` — Maintenance (dependency updates, CI config)
+
+**Example commit:**
+```
+feat: add PodDisruptionBudget for MongoDB StatefulSet
+
+k8s/pdb/poddisruptionbudgets.yaml:
+  minAvailable: 1 with replicas=1 -> 0 disruptions allowed
+  kubectl drain will block until MongoDB rescheduled
+  Intentional: data loss risk outweighs drain convenience
+  Production note: 3-node replica set -> change to minAvailable: 2
+```
+
+### Code Standards
+
+**Kubernetes manifests:**
+- All resources MUST have `app.kubernetes.io/name`, `app.kubernetes.io/component`, `app.kubernetes.io/part-of` labels
+- All resources MUST have `annotations.description` explaining the purpose
+- Resource requests AND limits MUST be set on every container
+- No `latest` tags in manifests (use specific versions or `sha-` prefixed ECR tags)
+
+**Terraform:**
+- All resources MUST have `Name` tag and `Project`, `Environment`, `ManagedBy` tags
+- All variables MUST have `description` and `type`
+- Sensitive variables MUST have `sensitive = true`
+- `terraform fmt` must pass before commit
+
+**Shell scripts:**
+- Start with `set -euo pipefail`
+- Use color-coded output (GREEN=ok, YELLOW=warn, RED=error)
+- Exit 0 on success, non-zero on failure (enables CI integration)
 
 ---
 
-## ✅ Definition of Done (For Each Day's Work)
+## Pull Request Process
 
-- [ ] All 4 commits made with descriptive messages
-- [ ] No secrets or credentials in any committed file
-- [ ] New files have inline comments explaining non-obvious decisions
-- [ ] Relevant documentation updated
-- [ ] `terraform fmt` run if Terraform files changed
-- [ ] All existing tests still pass
+1. **Fork** the repository
+2. **Branch naming**: `feat/short-description`, `fix/issue-description`, `docs/topic`
+3. **Make changes** with descriptive commits
+4. **Test locally**: `kubectl apply --dry-run=client -f k8s/` for manifest changes
+5. **Validate**: `kubeconform k8s/**/*.yaml` for schema validation
+6. **Open PR**: Fill in the PR template (added below)
+7. **CI must pass**: All 4 CI jobs must succeed before review
+
+### PR Checklist
+
+```markdown
+## Changes
+- [ ] Describe what changed and why
+
+## Type of Change
+- [ ] feat: New feature/resource
+- [ ] fix: Bug fix
+- [ ] docs: Documentation
+- [ ] refactor: Code restructure
+
+## Testing
+- [ ] `kubectl apply --dry-run=client` passes
+- [ ] `terraform validate` passes (if Terraform changes)
+- [ ] CI workflow passes
+
+## Documentation
+- [ ] Relevant docs updated (if applicable)
+- [ ] Commit messages follow convention
+```
 
 ---
 
-## 🚫 What NOT to Commit
+## Adding New Kubernetes Resources
 
-- `.env` files with real values
-- `*.tfstate` or `.terraform/` directories
-- AWS credentials or access keys
-- Kubeconfig files
-- `node_modules/`
-- Any file containing passwords, tokens, or secrets
+When adding a new K8s resource, always include:
+
+1. **The manifest** with full annotations
+2. **A NetworkPolicy update** if the resource makes network calls
+3. **A ResourceQuota check** to verify it fits within namespace limits
+4. **Documentation** in the relevant `docs/` file
+
+```bash
+# Validate your manifest
+kubectl apply --dry-run=client -f k8s/your-resource.yaml
+
+# Validate schema
+kubeconform -strict k8s/your-resource.yaml
+
+# Check if it fits within ResourceQuota
+kubectl describe resourcequota three-tier-quota -n three-tier
+```
 
 ---
 
-## 📁 File Organization
+## Adding New Terraform Resources
 
-Please follow the conventions defined in [docs/repo-structure.md](./docs/repo-structure.md).
+```bash
+# Validate HCL syntax
+cd terraform && terraform validate
+
+# Check formatting
+terraform fmt -check -diff
+
+# Preview changes (never apply without reviewing plan first)
+terraform plan
+
+# Apply only after team review
+terraform apply
+```
 
 ---
 
-## 🙏 Code of Conduct
+## Questions?
 
-Be respectful, constructive, and professional in all interactions.
+Open a [GitHub Discussion](https://github.com/Harshads-git/three-tier-eks-portfolio/discussions) for:
+- Architecture questions
+- Help setting up the project
+- Suggestions for improvement
+
+Open a [GitHub Issue](https://github.com/Harshads-git/three-tier-eks-portfolio/issues) for:
+- Bug reports
+- Feature requests
+- Documentation improvements
