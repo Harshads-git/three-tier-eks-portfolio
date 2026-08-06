@@ -1,4 +1,11 @@
 # ============================================================
+# .gitignore — Three-Tier EKS Portfolio
+# ============================================================
+# Rule: When in doubt, add it here.
+# Leaked secrets (AWS keys, K8s tokens) are catastrophic.
+# ============================================================
+
+# ============================================================
 # Node.js
 # ============================================================
 node_modules/
@@ -11,9 +18,11 @@ yarn-error.log*
 coverage/
 build/
 dist/
+.next/
+.cache/
 
 # ============================================================
-# Environment variables — NEVER commit secrets!
+# Environment variables — NEVER commit real secrets!
 # ============================================================
 .env
 .env.local
@@ -21,21 +30,28 @@ dist/
 .env.test.local
 .env.production.local
 *.env
+# ALLOW: example templates (no real values)
 !.env.example
-!.env.docker     # .env.docker contains ONLY local dev placeholders — safe to commit
+!**/.env.example
 
 # ============================================================
-# Terraform
+# Terraform — CRITICAL: State files contain plaintext secrets!
 # ============================================================
 .terraform/
 .terraform.lock.hcl
+# State files — NEVER commit. Always use S3 remote backend.
 *.tfstate
 *.tfstate.*
 *.tfstate.backup
+tfplan
+tfplan.binary
+# Crash logs
 crash.log
 crash.*.log
+# Variable files — contain account IDs, bucket names, etc.
 *.tfvars
-!terraform.tfvars.example
+!terraform.tfvars.example  # ALLOW: template with no real values
+# Override files (local development only)
 override.tf
 override.tf.json
 *_override.tf
@@ -44,60 +60,136 @@ override.tf.json
 terraform.rc
 
 # ============================================================
-# Docker
+# AWS Credentials — NEVER commit!
 # ============================================================
-.dockerignore
+.aws/
+aws-credentials
+credentials
+# Common credential file patterns
+*_credentials.json
+*-credentials.json
+aws_access_key*
+aws_secret_key*
 
 # ============================================================
-# Kubernetes
+# Kubernetes — CRITICAL: kubeconfig gives full cluster access!
 # ============================================================
 kubeconfig
 *.kubeconfig
+kubeconfig.yaml
+kubeconfig.yml
+.kube/
+# Decoded secret values
+*-decoded.yaml
+*-secret-values.yaml
 
 # ============================================================
-# OS generated files
+# Docker
 # ============================================================
+# Allow .dockerignore files (they're important for builds)
+# .dockerignore
+
+# ============================================================
+# k6 Load Test Results
+# ============================================================
+# Test results contain endpoint data — exclude from repo
+k6/results/
+results/
+*.json
+# But ALLOW k6 test SCRIPTS (they're code, not data)
+!k6/load-tests/*.js
+
+# ============================================================
+# Helm
+# ============================================================
+# Helm release override values (may contain credentials)
+*-values-override.yaml
+*-values-local.yaml
+
+# ============================================================
+# OS Generated Files
+# ============================================================
+# macOS
 .DS_Store
 .DS_Store?
 ._*
 .Spotlight-V100
 .Trashes
+# Windows
 ehthumbs.db
 Thumbs.db
 desktop.ini
+# Linux
+.directory
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.orig
 
 # ============================================================
 # IDE / Editors
 # ============================================================
+# JetBrains (IntelliJ, GoLand, etc.)
 .idea/
-.vscode/
+*.iml
+*.iws
+# VS Code (allow .vscode/extensions.json for team settings)
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+# Vim/Emacs
 *.swp
 *.swo
 *~
+# Eclipse
 .project
 .classpath
 .settings/
 
 # ============================================================
-# Logs
+# Logs and Debugging
 # ============================================================
 logs/
 *.log
+*.log.*
 npm-debug.log*
+pip-log.txt
 
 # ============================================================
-# Security / Sensitive
+# Certificates and Private Keys — NEVER commit!
 # ============================================================
 *.pem
 *.key
 *.crt
 *.p12
 *.pfx
+*.jks
 id_rsa
 id_rsa.pub
+id_ed25519
+id_ed25519.pub
 *.kube
+# JWT secrets
+*.jwt
 
 # ============================================================
-# Infracost
+# Python (for helper scripts)
+# ============================================================
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+venv/
+.venv/
+.python-version
+
+# ============================================================
+# Miscellaneous Tools
 # ============================================================
 infracost-output.json
+.checkov.baseline
+trivy-report.json
+*.sarif
+# Terraform plan files (can contain sensitive data)
+*.plan
