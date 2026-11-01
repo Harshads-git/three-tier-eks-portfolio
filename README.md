@@ -203,10 +203,15 @@ terraform apply   # ~18-20 minutes
 ### Step 4: Deploy Application
 
 ```bash
-# Configure kubectl
-aws eks update-kubeconfig --name three-tier-eks-cluster --region us-east-1
+# Option A: Automated apply script (ordered dependencies + status wait)
+chmod +x scripts/k8s-apply.sh
+./scripts/k8s-apply.sh
 
-# Apply all Kubernetes manifests
+# Option B: Via Makefile
+make k8s-apply
+
+# Option C: Manual kubectl apply in order
+aws eks update-kubeconfig --name three-tier-eks-cluster --region us-east-1
 kubectl apply -f k8s/mongo/namespace.yaml
 kubectl apply -f k8s/resource-quota/
 kubectl apply -f k8s/network-policies/
@@ -310,19 +315,28 @@ three-tier-eks-portfolio/
 │
 ├── 📁 scripts/                      # Operational helper scripts
 │   ├── setup-terraform-backend.sh   # Bootstrap S3/DynamoDB state backend
-│   └── cluster-health-check.sh     # Daily health check with color output
+│   ├── cluster-health-check.sh     # Daily health check with color output
+│   └── k8s-apply.sh                # Ordered manifest deployment with readiness checks
 │
-└── 📁 docs/                         # Architecture & operations documentation
-    ├── architecture.md              # System design, decisions, trade-offs
-    ├── diagrams.md                  # 5 Mermaid diagrams
-    ├── cicd-pipeline.md             # CI/CD workflow reference
-    ├── observability.md             # Prometheus/Grafana guide
-    ├── security-hardening.md        # 6-layer defense model
-    ├── load-testing.md              # k6 testing guide
-    ├── runbook.md                   # Incident response procedures
-    ├── cost-analysis.md             # AWS cost breakdown
-    ├── disaster-recovery.md         # RTO/RPO, backup, restore
-    └── interview-prep.md            # 12 technical Q&As
+├── 📁 gitops/                       # ArgoCD GitOps control plane
+│   ├── root-application.yaml        # App-of-Apps master bootstrap manifest
+│   ├── argocd/                      # ArgoCD Helm values, Kustomize, project RBAC
+│   └── apps/                        # Child Application CRDs (mongo, backend, frontend, ingress)
+│
+├── 📁 docs/                         # Architecture & operations documentation
+│   ├── architecture.md              # System design, decisions, trade-offs
+│   ├── diagrams.md                  # 5 Mermaid diagrams
+│   ├── cicd-pipeline.md             # CI/CD workflow reference
+│   ├── observability.md             # Prometheus/Grafana guide
+│   ├── security-hardening.md        # 6-layer defense model
+│   ├── load-testing.md              # k6 testing guide
+│   ├── runbook.md                   # Incident response procedures
+│   ├── cost-analysis.md             # AWS cost breakdown
+│   ├── disaster-recovery.md         # RTO/RPO, backup, restore
+│   ├── validation-checklist.md      # End-to-end verification checklist
+│   ├── retrospective.md             # 20-day project retrospective & lessons learned
+│   ├── gitops-argocd.md             # Declarative continuous delivery guide
+│   └── interview-prep.md            # 12 technical Q&As
 ```
 
 ---
@@ -390,23 +404,28 @@ three-tier-eks-portfolio/
 | [Runbook](docs/runbook.md) | Incident response for every alert |
 | [Cost Analysis](docs/cost-analysis.md) | AWS cost breakdown, optimization strategies |
 | [Disaster Recovery](docs/disaster-recovery.md) | RTO/RPO targets, backup procedures |
+| [Validation Checklist](docs/validation-checklist.md) | Step-by-step verification commands & expected outputs |
+| [Retrospective](docs/retrospective.md) | 20-day project retrospective, key decisions, production gap analysis |
 | [GitOps (ArgoCD)](docs/gitops-argocd.md) | Declarative App-of-Apps continuous delivery & self-healing |
 | [Interview Prep](docs/interview-prep.md) | 12 technical Q&As with depth answers |
 
 ---
 
-## 🏗️ Built in 20 Days
+## 🏗️ 30-Day Platform Roadmap
 
-| Phase | Days | Focus |
-|---|---|---|
-| **Foundation** | 1–4 | App development, Dockerization, K8s manifests |
-| **Networking** | 5–8 | Ingress, HPA, RBAC, SecurityContext |
-| **Infrastructure** | 9–11 | Terraform VPC/EKS, IAM/IRSA, Helm operators |
-| **Automation** | 12–15 | CI/CD pipelines, monitoring, load testing |
-| **Operations** | 16–17 | Runbook, cost analysis, architecture docs |
-| **Polish** | 18–20 | README, cleanup, final validation |
+| Phase | Days | Focus & Deliverables | Status |
+|---|---|---|---|
+| **Foundation** | 1–4 | Scaffold, React SPA, Node.js API, MongoDB, Docker multi-stage | ✅ Done |
+| **Networking & Security** | 5–8 | Namespace, Services, StatefulSet, Ingress ALB, RBAC, SecurityContext | ✅ Done |
+| **IaC Infrastructure** | 9–11 | Terraform VPC, EKS cluster, IAM/IRSA, EBS CSI, Load Balancer Controller | ✅ Done |
+| **Automation & Tests** | 12–15 | GitHub Actions (CI/CD/TF), NetworkPolicies, Prometheus/Grafana, k6 suite | ✅ Done |
+| **Operations & SRE** | 16–17 | Runbook, Cost Analysis, Health Checks, Disaster Recovery, Diagrams | ✅ Done |
+| **Showcase & DX** | 18–20 | Master README, Makefile, .pre-commit, `k8s-apply.sh`, Validation & Retrospective | ✅ Done |
+| **Advanced GitOps** | 21–23 | ArgoCD App-of-Apps, Canary Rollouts, External Secrets Operator | 🔄 In Progress |
+| **Enterprise Governance**| 24–26 | Kyverno Policy-as-Code, Cosign Image Signing, SBOM, Karpenter v1 | 📋 Planned |
+| **Observability & DR** | 27–30 | OpenTelemetry Distributed Tracing, Chaos Testing, Velero Backup | 📋 Planned |
 
-**4 commits/day × 20 days = 80 commits** of production-quality, annotated infrastructure code.
+**4 commits/day with architecture-first commit bodies explaining the WHY.**
 
 ---
 
