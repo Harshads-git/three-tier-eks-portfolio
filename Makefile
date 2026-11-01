@@ -20,6 +20,7 @@
         k8s-apply k8s-delete k8s-status \
         health smoke load-test hpa-test \
         grafana prometheus port-forward-all \
+        argocd-install argocd-bootstrap argocd-status argocd-ui argocd-password \
         build-backend build-frontend \
         clean
 
@@ -162,6 +163,31 @@ k8s-top: ## Show CPU/memory usage of pods
 
 k8s-events: ## Show recent events (warnings first)
 	kubectl get events -n $(NAMESPACE) --sort-by='.lastTimestamp' | tail -30
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GITOPS (ArgoCD)
+# ─────────────────────────────────────────────────────────────────────────────
+argocd-install: ## Install ArgoCD control plane via Kustomize
+	@echo "$(BLUE)Installing ArgoCD control plane...$(RESET)"
+	kubectl apply -k gitops/argocd/
+	@echo "$(GREEN)✓ ArgoCD installed. Waiting for pods to become ready...$(RESET)"
+	kubectl rollout status deployment/argocd-server -n argocd --timeout=180s
+
+argocd-bootstrap: ## Apply App-of-Apps root application for full GitOps sync
+	@echo "$(BLUE)Bootstrapping GitOps platform via App-of-Apps...$(RESET)"
+	kubectl apply -f gitops/argocd/project.yaml
+	kubectl apply -f gitops/root-application.yaml
+	@echo "$(GREEN)✓ Root application applied. ArgoCD is synchronizing all tiers.$(RESET)"
+
+argocd-status: ## List all managed ArgoCD applications and health states
+	kubectl get applications -n argocd -o wide
+
+argocd-ui: ## Port-forward ArgoCD Web UI to http://localhost:8080
+	@echo "$(GREEN)Opening ArgoCD Web UI at http://localhost:8080 (user: admin)$(RESET)"
+	kubectl port-forward svc/argocd-server 8080:443 -n argocd
+
+argocd-password: ## Retrieve initial ArgoCD admin password
+	@kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d && echo ""
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HEALTH & DIAGNOSTICS

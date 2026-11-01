@@ -390,6 +390,7 @@ three-tier-eks-portfolio/
 | [Runbook](docs/runbook.md) | Incident response for every alert |
 | [Cost Analysis](docs/cost-analysis.md) | AWS cost breakdown, optimization strategies |
 | [Disaster Recovery](docs/disaster-recovery.md) | RTO/RPO targets, backup procedures |
+| [GitOps (ArgoCD)](docs/gitops-argocd.md) | Declarative App-of-Apps continuous delivery & self-healing |
 | [Interview Prep](docs/interview-prep.md) | 12 technical Q&As with depth answers |
 
 ---
