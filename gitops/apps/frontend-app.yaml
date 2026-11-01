@@ -1,0 +1,34 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: three-tier-frontend
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: three-tier-frontend
+    app.kubernetes.io/part-of: three-tier-platform
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: three-tier-project
+  source:
+    repoURL: "https://github.com/Harshads-git/three-tier-eks-portfolio.git"
+    targetRevision: main
+    path: k8s/frontend
+  destination:
+    server: "https://kubernetes.default.svc"
+    namespace: three-tier
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ApplyOutOfSyncOnly=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 2m

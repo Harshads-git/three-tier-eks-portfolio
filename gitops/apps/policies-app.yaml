@@ -1,0 +1,28 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: three-tier-security-policies
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: three-tier-security-policies
+    app.kubernetes.io/part-of: three-tier-platform
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: three-tier-project
+  source:
+    repoURL: "https://github.com/Harshads-git/three-tier-eks-portfolio.git"
+    targetRevision: main
+    path: k8s/network-policies
+  destination:
+    server: "https://kubernetes.default.svc"
+    namespace: three-tier
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ApplyOutOfSyncOnly=true
