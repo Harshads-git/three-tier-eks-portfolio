@@ -1,0 +1,67 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# gitops/root-application.yaml — ArgoCD App-of-Apps Bootstrap Pattern
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# PURPOSE:
+#   The root application acts as the single orchestrator for the entire
+#   three-tier platform. Applying this single manifest causes ArgoCD to:
+#   1. Clone this repository at gitops/apps/
+#   2. Discover all child Application CRDs (mongo, backend, frontend, ingress)
+#   3. Recursively reconcile and deploy each tier into the EKS cluster
+#   4. Enforce automated self-healing against manual drift
+#
+# USAGE:
+#   kubectl apply -f gitops/root-application.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root-application
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: root-application
+    app.kubernetes.io/part-of: gitops-control-plane
+  finalizers:
+    # Cascading deletion: deleting root deletes all managed child applications
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: three-tier-project
+
+  source:
+    repoURL: "https://github.com/Harshads-git/three-tier-eks-portfolio.git"
+    targetRevision: main
+    path: gitops/apps
+    recurse: false
+
+  destination:
+    server: "https://kubernetes.default.svc"
+    namespace: argocd
+
+  # Continuous Synchronization & Self-Healing
+  syncPolicy:
+    automated:
+      prune: true     # Automatically delete child apps removed from git
+      selfHeal: true  # Automatically revert manual kubectl changes back to git state
+      allowEmpty: false
+
+    syncOptions:
+      - CreateNamespace=true
+      - ApplyOutOfSyncOnly=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+  # Visual representation & grouping in ArgoCD Web UI
+  info:
+    - name: "Pattern"
+      value: "App-of-Apps"
+    - name: "Maintained By"
+      value: "Harshad"
+    - name: "Repository"
+      value: "https://github.com/Harshads-git/three-tier-eks-portfolio"

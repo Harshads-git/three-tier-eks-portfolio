@@ -1,0 +1,52 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# gitops/argocd/project.yaml — ArgoCD AppProject for Three-Tier Workloads
+# ─────────────────────────────────────────────────────────────────────────────
+# An AppProject provides a logical grouping of applications, isolating
+# permissions, target clusters, and allowed source git repositories.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: three-tier-project
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: "Production project for Three-Tier EKS portfolio workloads"
+
+  # Allowed Git repositories
+  sourceRepos:
+    - "https://github.com/Harshads-git/three-tier-eks-portfolio.git"
+    - "https://github.com/Harshads-git/three-tier-eks-portfolio"
+
+  # Target cluster and namespaces this project is authorized to deploy into
+  destinations:
+    - namespace: three-tier
+      server: https://kubernetes.default.svc
+    - namespace: monitoring
+      server: https://kubernetes.default.svc
+    - namespace: argocd
+      server: https://kubernetes.default.svc
+
+  # Cluster-scoped resources allowed to be deployed by this project
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRole
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRoleBinding
+
+  # Namespace-scoped resource permissions (allow all within target namespace)
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"
+
+  # Sync windows for change control (optional safety guards)
+  syncWindows:
+    - kind: allow
+      schedule: "* * * * *"
+      duration: 1h
+      applications:
+        - "*"
+      manualSync: true
