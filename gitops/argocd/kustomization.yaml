@@ -1,0 +1,27 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# gitops/argocd/kustomization.yaml — Declarative ArgoCD Bootstrap
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: argocd
+
+resources:
+  - namespace.yaml
+  # Official upstream Argo CD v2.10 release
+  - https://raw.githubusercontent.com/argoproj/argo-cd/v2.10.4/manifests/ha/install.yaml
+
+patches:
+  - target:
+      kind: ConfigMap
+      name: argocd-cm
+    patch: |-
+      - op: add
+        path: /data/url
+        value: https://argocd.three-tier.local
+      - op: add
+        path: /data/application.instanceLabelKey
+        value: argocd.argoproj.io/instance
+      - op: add
+        path: /data/timeout.reconciliation
+        value: "180s"

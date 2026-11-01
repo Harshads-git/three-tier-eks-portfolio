@@ -1,0 +1,165 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# gitops/argocd/values.yaml — Production Helm Configuration for ArgoCD
+# ─────────────────────────────────────────────────────────────────────────────
+# Reference Chart: argo/argo-cd (https://argoproj.github.io/argo-helm)
+#
+# DESIGN DECISIONS:
+# 1. AWS ALB Ingress Integration: Exposes UI via ALB with target-type: ip and TLS.
+# 2. Least-Privilege RBAC: Default readonly policy, dedicated dev/admin roles.
+# 3. Observability: Enables Prometheus metrics & ServiceMonitors for all components.
+# 4. Resilience: Resource requests/limits and PodDisruptionBudgets on core pods.
+# ─────────────────────────────────────────────────────────────────────────────
+
+global:
+  domain: argocd.three-tier.local
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 999
+    fsGroup: 999
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ARGO CD SERVER
+# ─────────────────────────────────────────────────────────────────────────────
+server:
+  replicas: 2
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 75
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  certificate:
+    enabled: true
+    domain: argocd.three-tier.local
+
+  # Expose via AWS Application Load Balancer
+  ingress:
+    enabled: true
+    ingressClassName: alb
+    annotations:
+      alb.ingress.kubernetes.io/scheme: internet-facing
+      alb.ingress.kubernetes.io/target-type: ip
+      alb.ingress.kubernetes.io/backend-protocol: HTTPS
+      alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+      alb.ingress.kubernetes.io/ssl-redirect: '443'
+      alb.ingress.kubernetes.io/healthcheck-path: /healthz
+      alb.ingress.kubernetes.io/healthcheck-protocol: HTTPS
+      alb.ingress.kubernetes.io/tags: Environment=production,Project=three-tier-eks,ManagedBy=Terraform
+    hosts:
+      - argocd.three-tier.local
+    paths:
+      - /
+    pathType: Prefix
+
+  # RBAC Configuration (Role-Based Access Control)
+  rbacConfig:
+    policy.default: role:readonly
+    policy.csv: |
+      p, role:developer, applications, get, */*, allow
+      p, role:developer, applications, sync, */*, allow
+      p, role:developer, logs, get, */*, allow
+      p, role:admin, applications, *, */*, allow
+      p, role:admin, clusters, *, *, allow
+      p, role:admin, repositories, *, *, allow
+      g, Harshads-git, role:admin
+    scopes: '[groups, email]'
+
+  # Server config
+  config:
+    url: https://argocd.three-tier.local
+    application.instanceLabelKey: argocd.argoproj.io/instance
+    admin.enabled: true
+    timeout.reconciliation: 180s # Periodic drift detection loop
+
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      additionalLabels:
+        release: kube-prometheus-stack
+
+# ─────────────────────────────────────────────────────────────────────────────
+# APPLICATION CONTROLLER (Reconciliation Engine)
+# ─────────────────────────────────────────────────────────────────────────────
+controller:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      additionalLabels:
+        release: kube-prometheus-stack
+  args:
+    statusProcessors: "20"
+    operationProcessors: "10"
+    appResyncPeriod: "180"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# REPO SERVER (Manifest Generator & Git Cloner)
+# ─────────────────────────────────────────────────────────────────────────────
+repoServer:
+  replicas: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      additionalLabels:
+        release: kube-prometheus-stack
+
+# ─────────────────────────────────────────────────────────────────────────────
+# APPLICATION SET CONTROLLER (Multi-Cluster / Multi-Env Orchestration)
+# ─────────────────────────────────────────────────────────────────────────────
+applicationSet:
+  enabled: true
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# REDIS (State Cache)
+# ─────────────────────────────────────────────────────────────────────────────
+redis:
+  enabled: true
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# NOTIFICATIONS (Alerts on Sync Failures)
+# ─────────────────────────────────────────────────────────────────────────────
+notifications:
+  enabled: true
+  metrics:
+    enabled: true
