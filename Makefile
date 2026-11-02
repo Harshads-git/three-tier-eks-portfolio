@@ -21,6 +21,7 @@
         health smoke load-test hpa-test \
         grafana prometheus port-forward-all \
         argocd-install argocd-bootstrap argocd-status argocd-ui argocd-password \
+        rollout-install rollout-watch rollout-promote rollout-abort rollout-dashboard \
         build-backend build-frontend \
         clean
 
@@ -188,6 +189,27 @@ argocd-ui: ## Port-forward ArgoCD Web UI to http://localhost:8080
 
 argocd-password: ## Retrieve initial ArgoCD admin password
 	@kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d && echo ""
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PROGRESSIVE DELIVERY (Argo Rollouts)
+# ─────────────────────────────────────────────────────────────────────────────
+rollout-install: ## Install Argo Rollouts controller and dashboard
+	@echo "$(BLUE)Installing Argo Rollouts operator...$(RESET)"
+	kubectl apply -k k8s/rollouts/
+	@echo "$(GREEN)✓ Argo Rollouts controller installed.$(RESET)"
+
+rollout-watch: ## Live terminal visualization of backend Canary progression
+	kubectl argo rollouts get rollout backend -n $(NAMESPACE) --watch
+
+rollout-promote: ## Manually promote backend Canary to next step / 100%
+	kubectl argo rollouts promote backend -n $(NAMESPACE)
+
+rollout-abort: ## Emergency abort of Canary rollout (instantly roll back to stable)
+	kubectl argo rollouts abort backend -n $(NAMESPACE)
+
+rollout-dashboard: ## Open Argo Rollouts web dashboard at http://localhost:3100
+	@echo "$(GREEN)Opening Argo Rollouts Dashboard at http://localhost:3100$(RESET)"
+	kubectl port-forward svc/argo-rollouts-dashboard 3100:3100 -n argo-rollouts
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HEALTH & DIAGNOSTICS

@@ -286,6 +286,7 @@ three-tier-eks-portfolio/
 │   ├── backend/                     # Deployment, Service, HPA, ConfigMap
 │   ├── frontend/                    # Deployment, Service, HPA
 │   ├── ingress/                     # ALB Ingress with routing rules
+│   ├── rollouts/                    # Argo Rollouts Canary & AnalysisTemplates
 │   ├── network-policies/            # Zero-trust NetworkPolicies
 │   ├── pdb/                         # PodDisruptionBudgets
 │   ├── resource-quota/              # ResourceQuota + LimitRange
@@ -407,6 +408,7 @@ three-tier-eks-portfolio/
 | [Validation Checklist](docs/validation-checklist.md) | Step-by-step verification commands & expected outputs |
 | [Retrospective](docs/retrospective.md) | 20-day project retrospective, key decisions, production gap analysis |
 | [GitOps (ArgoCD)](docs/gitops-argocd.md) | Declarative App-of-Apps continuous delivery & self-healing |
+| [Canary Deployments](docs/canary-deployments.md) | Progressive delivery with Argo Rollouts & Prometheus analysis |
 | [Interview Prep](docs/interview-prep.md) | 12 technical Q&As with depth answers |
 
 ---
