@@ -1,0 +1,165 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/rollouts/backend-rollout.yaml — Progressive Canary Rollout for Backend
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# WHY ARGO ROLLOUTS OVER STANDARD DEPLOYMENT?
+# ─────────────────────────────────────────────────────────────────────────────
+# Standard Kubernetes Deployments use RollingUpdate:
+#   - They replace pods sequentially (1-by-1 or 25% at a time).
+#   - If new code has a latent bug (e.g. Memory leak, unhandled 500 error on
+#     specific inputs), the rolling update replaces 100% of pods regardless.
+#   - Production outages occur before metrics alert humans.
+#
+# Argo Rollouts Canary Strategy:
+#   1. Deploys canary pods alongside existing stable pods.
+#   2. Shifts 10% of traffic to Canary via AWS ALB.
+#   3. Runs automated AnalysisTemplates against Prometheus (error rate & latency).
+#   4. If metrics breach thresholds → INSTANT AUTOMATED ROLLBACK (0s delay).
+#   5. If metrics pass → gradually increases to 25% → 50% → 100%.
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+
+metadata:
+  name: backend
+  namespace: three-tier
+  labels:
+    app: backend
+    app.kubernetes.io/name: backend
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: three-tier-portfolio
+    app.kubernetes.io/version: "1.0.0"
+
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+
+  # Selector must match pod template labels
+  selector:
+    matchLabels:
+      app: backend
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # PROGRESSIVE CANARY STRATEGY
+  # ───────────────────────────────────────────────────────────────────────────
+  strategy:
+    canary:
+      # Stable and Canary Services for traffic separation
+      stableService: backend-service
+      canaryService: backend-service-canary
+
+      # AWS Application Load Balancer Ingress traffic routing
+      trafficRouting:
+        alb:
+          ingress: three-tier-ingress
+          servicePort: 3001
+
+      # Keep old ReplicaSet alive for 60s after completion for instant rollback
+      scaleDownDelaySeconds: 60
+
+      # Canary step progression with traffic weights and observation pauses
+      steps:
+        # Step 1: Send 10% traffic to Canary
+        - setWeight: 10
+        # Step 2: Pause 2 minutes for Prometheus metric gathering
+        - pause: { duration: 2m }
+
+        # Step 3: Increase Canary traffic to 25%
+        - setWeight: 25
+        # Step 4: Pause 5 minutes for sustained load validation
+        - pause: { duration: 5m }
+
+        # Step 5: Increase Canary traffic to 50%
+        - setWeight: 50
+        # Step 6: Pause 5 minutes
+        - pause: { duration: 5m }
+
+        # Step 7: Promote Canary to 100% (Complete Rollout)
+        - setWeight: 100
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # POD TEMPLATE (Production-hardened)
+  # ───────────────────────────────────────────────────────────────────────────
+  template:
+    metadata:
+      labels:
+        app: backend
+        app.kubernetes.io/name: backend
+        app.kubernetes.io/component: api
+        app.kubernetes.io/part-of: three-tier-portfolio
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "5000"
+        prometheus.io/path: "/metrics"
+
+    spec:
+      serviceAccountName: backend-sa
+
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+
+      containers:
+        - name: backend
+          image: 123456789012.dkr.ecr.us-east-1.amazonaws.com/three-tier-eks-cluster-backend:latest
+          imagePullPolicy: IfNotPresent
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop:
+                - ALL
+
+          ports:
+            - name: http
+              containerPort: 5000
+              protocol: TCP
+
+          # Resource Governance
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+
+          # Health Probes
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 5
+            timeoutSeconds: 3
+            successThreshold: 1
+            failureThreshold: 3
+
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          # Environment configuration
+          envFrom:
+            - configMapRef:
+                name: backend-config
+          env:
+            - name: MONGO_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mongo-secret
+                  key: mongo-root-password
+            - name: MONGO_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: mongo-secret
+                  key: mongo-root-username

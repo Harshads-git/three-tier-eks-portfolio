@@ -1,0 +1,35 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/rollouts/backend-service-canary.yaml — Backend Canary Service
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# PURPOSE:
+#   Dedicated Kubernetes Service that routes traffic exclusively to pods
+#   running the newly deployed Canary version of the backend.
+#
+#   Argo Rollouts dynamically modifies this service's selector to target
+#   canary pods with the rollout pod-template-hash label.
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-service-canary
+  namespace: three-tier
+  labels:
+    app: backend
+    app.kubernetes.io/name: backend
+    app.kubernetes.io/component: api-canary
+    app.kubernetes.io/part-of: three-tier-portfolio
+  annotations:
+    description: "Canary service for backend API during progressive deployment"
+
+spec:
+  type: ClusterIP
+  selector:
+    app: backend
+  ports:
+    - name: http
+      port: 3001
+      targetPort: http
+      protocol: TCP
+  sessionAffinity: None
