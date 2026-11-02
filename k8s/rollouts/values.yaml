@@ -1,0 +1,78 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/rollouts/values.yaml — Helm Configuration for Argo Rollouts Controller
+# ─────────────────────────────────────────────────────────────────────────────
+# Reference Chart: argo/argo-rollouts (https://argoproj.github.io/argo-helm)
+#
+# PURPOSE:
+#   Deploys the Argo Rollouts operator into Amazon EKS. Argo Rollouts extends
+#   Kubernetes with advanced deployment capabilities: Canary deployments,
+#   Blue-Green deployments, Experimentation, and Automated Metric Analysis.
+#
+# KEY ARCHITECTURAL DECISIONS:
+# 1. High Availability (HA): 2 controller replicas with active leader election.
+# 2. Observability: Enables Prometheus metrics exporter & ServiceMonitor CRD.
+# 3. AWS ALB Traffic Routing: Native support for weighted target group shifts.
+# 4. Dashboard Web UI: Visualizes step progression, canary metrics, and state.
+# ─────────────────────────────────────────────────────────────────────────────
+
+controller:
+  replicas: 2
+  leaderElection:
+    enabled: true
+    leaseDuration: 15s
+    renewDeadline: 10s
+    retryPeriod: 2s
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 999
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+
+  # Prometheus metrics scraping
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      additionalLabels:
+        release: kube-prometheus-stack
+      interval: 15s
+
+  # Traffic routing plugin configurations
+  trafficRouting:
+    alb:
+      enabled: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ARGO ROLLOUTS DASHBOARD (Web UI)
+# ─────────────────────────────────────────────────────────────────────────────
+dashboard:
+  enabled: true
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+  service:
+    type: ClusterIP
+    port: 3100
+    targetPort: 3100
+
+  # Optional Ingress for external access
+  ingress:
+    enabled: false # Accessed internally via kubectl argo rollouts dashboard or port-forward
