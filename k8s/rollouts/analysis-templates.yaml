@@ -1,0 +1,74 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/rollouts/analysis-templates.yaml — Automated Canary Analysis via Prometheus
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# PURPOSE:
+#   Defines automated metric evaluation gates that continuously query Prometheus
+#   during a Canary rollout. If any metric breaches the specified threshold,
+#   Argo Rollouts automatically aborts the deployment and rolls back instantly.
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: backend-success-rate
+  namespace: three-tier
+  labels:
+    app.kubernetes.io/name: backend-success-rate
+    app.kubernetes.io/part-of: progressive-delivery
+spec:
+  args:
+    - name: service-name
+      value: backend-service-canary
+    - name: prometheus-url
+      value: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
+
+  metrics:
+    - name: http-error-rate
+      interval: 30s
+      # Fail the rollout if 2 consecutive measurement cycles fail
+      failureLimit: 2
+      # Required count of successful consecutive checks to pass
+      count: 5
+      # Success condition: Error rate must stay strictly below 1% (0.01)
+      successCondition: result[0] <= 0.01
+      provider:
+        prometheus:
+          address: "{{args.prometheus-url}}"
+          query: |
+            (
+              sum(rate(http_requests_total{namespace="three-tier", status=~"5.."}[1m])) or vector(0)
+            )
+            /
+            (
+              sum(rate(http_requests_total{namespace="three-tier"}[1m])) or vector(1)
+            )
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: backend-latency-p99
+  namespace: three-tier
+  labels:
+    app.kubernetes.io/name: backend-latency-p99
+    app.kubernetes.io/part-of: progressive-delivery
+spec:
+  args:
+    - name: prometheus-url
+      value: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
+
+  metrics:
+    - name: p99-response-time
+      interval: 30s
+      failureLimit: 2
+      count: 5
+      # Success condition: P99 latency must remain under 300ms (0.300s)
+      successCondition: result[0] <= 0.300
+      provider:
+        prometheus:
+          address: "{{args.prometheus-url}}"
+          query: |
+            histogram_quantile(0.99,
+              sum(rate(http_request_duration_seconds_bucket{namespace="three-tier"}[1m])) by (le)
+            ) or vector(0.050)

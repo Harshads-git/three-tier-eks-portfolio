@@ -58,6 +58,15 @@ spec:
       # Keep old ReplicaSet alive for 60s after completion for instant rollback
       scaleDownDelaySeconds: 60
 
+      # Continuous metric analysis during canary progression
+      analysis:
+        templates:
+          - templateName: backend-success-rate
+          - templateName: backend-latency-p99
+        args:
+          - name: service-name
+            value: backend-service-canary
+
       # Canary step progression with traffic weights and observation pauses
       steps:
         # Step 1: Send 10% traffic to Canary
