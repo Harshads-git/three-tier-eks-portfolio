@@ -1,0 +1,70 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/external-secrets/values.yaml — Production Helm Configuration for ESO
+# ─────────────────────────────────────────────────────────────────────────────
+# Reference Chart: external-secrets/external-secrets
+# (https://charts.external-secrets.io)
+#
+# DESIGN & ARCHITECTURE:
+# 1. High Availability (HA): 2 controller replicas with active leader election.
+# 2. AWS IRSA Integration: Associates with existing external-secrets-sa.
+# 3. Security: Read-only root filesystem, non-root user, dropped capabilities.
+# 4. Observability: Enables Prometheus metrics & ServiceMonitors.
+# ─────────────────────────────────────────────────────────────────────────────
+
+replicaCount: 2
+
+leaderElect: true
+
+serviceAccount:
+  create: false
+  name: external-secrets-sa
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi
+
+# Metrics for kube-prometheus-stack
+metrics:
+  service:
+    enabled: true
+    port: 8080
+  serviceMonitor:
+    enabled: true
+    additionalLabels:
+      release: kube-prometheus-stack
+    interval: 30s
+
+# Webhook validator for ExternalSecret custom resources
+webhook:
+  replicaCount: 2
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+# Cert-controller handles admission webhook TLS certificates
+certController:
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 20m
+      memory: 32Mi
+    limits:
+      cpu: 50m
+      memory: 64Mi

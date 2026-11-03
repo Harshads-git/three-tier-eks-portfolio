@@ -1,0 +1,14 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/external-secrets/kustomization.yaml — Declarative ESO Bootstrap
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: external-secrets
+
+resources:
+  - namespace.yaml
+  - serviceaccount.yaml
+  # Official upstream release manifests for External Secrets Operator v0.9.14
+  - https://github.com/external-secrets/external-secrets/releases/download/v0.9.14/external-secrets.yaml
+  - cluster-secret-store.yaml
