@@ -22,6 +22,7 @@
         grafana prometheus port-forward-all \
         argocd-install argocd-bootstrap argocd-status argocd-ui argocd-password \
         rollout-install rollout-watch rollout-promote rollout-abort rollout-dashboard \
+        eso-install eso-status eso-seed eso-sync \
         build-backend build-frontend \
         clean
 
@@ -210,6 +211,25 @@ rollout-abort: ## Emergency abort of Canary rollout (instantly roll back to stab
 rollout-dashboard: ## Open Argo Rollouts web dashboard at http://localhost:3100
 	@echo "$(GREEN)Opening Argo Rollouts Dashboard at http://localhost:3100$(RESET)"
 	kubectl port-forward svc/argo-rollouts-dashboard 3100:3100 -n argo-rollouts
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECRETS MANAGEMENT (External Secrets Operator)
+# ─────────────────────────────────────────────────────────────────────────────
+eso-install: ## Install External Secrets Operator and ClusterSecretStore
+	@echo "$(BLUE)Installing External Secrets Operator...$(RESET)"
+	kubectl apply -k k8s/external-secrets/
+	@echo "$(GREEN)✓ External Secrets Operator installed.$(RESET)"
+
+eso-seed: ## Populate AWS Secrets Manager with project credentials
+	chmod +x scripts/seed-aws-secrets.sh
+	./scripts/seed-aws-secrets.sh $(AWS_REGION)
+
+eso-status: ## Check synchronization status of all ExternalSecrets
+	kubectl get externalsecrets -n $(NAMESPACE) -o wide
+
+eso-sync: ## Force immediate synchronization of MongoDB external secret
+	kubectl annotate externalsecret mongo-external-secret -n $(NAMESPACE) force-sync=$(shell date +%s) --overwrite
+	@echo "$(GREEN)✓ Sync triggered for mongo-external-secret$(RESET)"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HEALTH & DIAGNOSTICS

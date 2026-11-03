@@ -287,6 +287,7 @@ three-tier-eks-portfolio/
 │   ├── frontend/                    # Deployment, Service, HPA
 │   ├── ingress/                     # ALB Ingress with routing rules
 │   ├── rollouts/                    # Argo Rollouts Canary & AnalysisTemplates
+│   ├── external-secrets/            # External Secrets Operator & AWS Secrets Manager sync
 │   ├── network-policies/            # Zero-trust NetworkPolicies
 │   ├── pdb/                         # PodDisruptionBudgets
 │   ├── resource-quota/              # ResourceQuota + LimitRange
@@ -337,6 +338,8 @@ three-tier-eks-portfolio/
 │   ├── validation-checklist.md      # End-to-end verification checklist
 │   ├── retrospective.md             # 20-day project retrospective & lessons learned
 │   ├── gitops-argocd.md             # Declarative continuous delivery guide
+│   ├── canary-deployments.md        # Progressive Canary delivery with Argo Rollouts
+│   ├── secrets-management.md        # Dynamic secret synchronization via IRSA
 │   └── interview-prep.md            # 12 technical Q&As
 ```
 
@@ -409,6 +412,7 @@ three-tier-eks-portfolio/
 | [Retrospective](docs/retrospective.md) | 20-day project retrospective, key decisions, production gap analysis |
 | [GitOps (ArgoCD)](docs/gitops-argocd.md) | Declarative App-of-Apps continuous delivery & self-healing |
 | [Canary Deployments](docs/canary-deployments.md) | Progressive delivery with Argo Rollouts & Prometheus analysis |
+| [Secrets Management (ESO)](docs/secrets-management.md) | Dynamic secret synchronization via AWS Secrets Manager & IRSA |
 | [Interview Prep](docs/interview-prep.md) | 12 technical Q&As with depth answers |
 
 ---
@@ -423,7 +427,7 @@ three-tier-eks-portfolio/
 | **Automation & Tests** | 12–15 | GitHub Actions (CI/CD/TF), NetworkPolicies, Prometheus/Grafana, k6 suite | ✅ Done |
 | **Operations & SRE** | 16–17 | Runbook, Cost Analysis, Health Checks, Disaster Recovery, Diagrams | ✅ Done |
 | **Showcase & DX** | 18–20 | Master README, Makefile, .pre-commit, `k8s-apply.sh`, Validation & Retrospective | ✅ Done |
-| **Advanced GitOps** | 21–23 | ArgoCD App-of-Apps, Canary Rollouts, External Secrets Operator | 🔄 In Progress |
+| **Advanced GitOps & Secrets**| 21–23 | ArgoCD App-of-Apps, Canary Rollouts, External Secrets Operator | ✅ Done |
 | **Enterprise Governance**| 24–26 | Kyverno Policy-as-Code, Cosign Image Signing, SBOM, Karpenter v1 | 📋 Planned |
 | **Observability & DR** | 27–30 | OpenTelemetry Distributed Tracing, Chaos Testing, Velero Backup | 📋 Planned |
 
