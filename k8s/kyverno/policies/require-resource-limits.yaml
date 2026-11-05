@@ -1,0 +1,46 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/kyverno/policies/require-resource-limits.yaml — Enforce CPU/RAM Governance
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# PURPOSE:
+#   Every container must specify resource requests and limits. Without limits:
+#   1. A pod with a memory leak consumes all node RAM → triggers node OOM panic.
+#   2. The Kubernetes scheduler cannot accurately bin-pack nodes.
+#   3. Cluster Autoscaler & Karpenter cannot calculate provisioning headroom.
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-resource-limits
+  annotations:
+    policies.kyverno.io/title: Require CPU and Memory Limits
+    policies.kyverno.io/category: Best Practices / Resource Management
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/description: >-
+      Mandates that every container explicitly defines CPU and Memory
+      requests and limits.
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: validate-resources
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - three-tier
+      validate:
+        message: "CPU and Memory requests and limits must be specified for all containers."
+        pattern:
+          spec:
+            containers:
+              - resources:
+                  requests:
+                    cpu: "?*"
+                    memory: "?*"
+                  limits:
+                    cpu: "?*"
+                    memory: "?*"
