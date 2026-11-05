@@ -23,6 +23,7 @@
         argocd-install argocd-bootstrap argocd-status argocd-ui argocd-password \
         rollout-install rollout-watch rollout-promote rollout-abort rollout-dashboard \
         eso-install eso-status eso-seed eso-sync \
+        kyverno-install kyverno-policies kyverno-report kyverno-test \
         build-backend build-frontend \
         clean
 
@@ -230,6 +231,33 @@ eso-status: ## Check synchronization status of all ExternalSecrets
 eso-sync: ## Force immediate synchronization of MongoDB external secret
 	kubectl annotate externalsecret mongo-external-secret -n $(NAMESPACE) force-sync=$(shell date +%s) --overwrite
 	@echo "$(GREEN)✓ Sync triggered for mongo-external-secret$(RESET)"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POLICY AS CODE (Kyverno)
+# ─────────────────────────────────────────────────────────────────────────────
+kyverno-install: ## Install Kyverno policy engine via Kustomize
+	@echo "$(BLUE)Installing Kyverno Admission Controller...$(RESET)"
+	kubectl apply -k k8s/kyverno/
+	@echo "$(GREEN)✓ Kyverno installed. Waiting for admission controller...$(RESET)"
+	kubectl rollout status deployment/kyverno-admission-controller -n kyverno --timeout=120s
+
+kyverno-policies: ## Apply all security and governance ClusterPolicies
+	@echo "$(BLUE)Applying Kyverno ClusterPolicies...$(RESET)"
+	kubectl apply -f k8s/kyverno/policies/
+	@echo "$(GREEN)✓ ClusterPolicies enforced: non-root, limits, registries, tags$(RESET)"
+
+kyverno-report: ## Display aggregated policy reports across cluster
+	@echo "$(BLUE)=== NAMESPACE POLICY REPORT ($(NAMESPACE)) ===$(RESET)"
+	kubectl get policyreports -n $(NAMESPACE) 2>/dev/null || echo "No reports yet"
+	@echo ""
+	@echo "$(BLUE)=== CLUSTER-WIDE POLICY REPORT ===$(RESET)"
+	kubectl get clusterpolicyreports 2>/dev/null || echo "No cluster reports yet"
+
+kyverno-test: ## Test policy enforcement by attempting to run a forbidden pod
+	@echo "$(BLUE)Testing policy enforcement (attempting to deploy prohibited ':latest' pod)...$(RESET)"
+	@! kubectl run kyverno-test-pod --image=nginx:latest -n $(NAMESPACE) 2>&1 | grep -q "denied the request" \
+		&& echo "$(GREEN)✓ Success: Prohibited pod was correctly blocked by Kyverno!$(RESET)" \
+		|| echo "$(RED)✗ Warning: Pod was not blocked. Check if Kyverno webhooks are ready.$(RESET)"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HEALTH & DIAGNOSTICS
