@@ -1,0 +1,43 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/kyverno/policies/disallow-latest-tag.yaml — Enforce Immutable Image Tags
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# PURPOSE:
+#   Using ':latest' or unversioned container images in production is dangerous:
+#   1. Non-deterministic rollouts: Different nodes might pull different layers.
+#   2. Broken Rollbacks: Rolling back to ':latest' doesn't change the tag.
+#   3. Cache Inconsistencies: Nodes with cached ':latest' won't pull updates.
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-latest-tag
+  annotations:
+    policies.kyverno.io/title: Disallow 'latest' Image Tag
+    policies.kyverno.io/category: Best Practices / Supply Chain Security
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/description: >-
+      The ':latest' tag is mutable and makes it impossible to guarantee
+      consistent deployments. This policy rejects any container with ':latest'
+      or without an explicit version tag.
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: validate-image-tag
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - three-tier
+      validate:
+        message: "Using ':latest' or omitting image tags is forbidden. Specify an explicit immutable tag (e.g. sha-xxxx)."
+        pattern:
+          spec:
+            containers:
+              - image: "!*:latest"
+            =(initContainers):
+              - image: "!*:latest"

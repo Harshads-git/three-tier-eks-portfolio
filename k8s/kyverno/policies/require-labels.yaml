@@ -1,0 +1,40 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/kyverno/policies/require-labels.yaml — Standard Metadata Enforcement
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# PURPOSE:
+#   Enforces standard Kubernetes metadata labels (app.kubernetes.io/name,
+#   app.kubernetes.io/part-of) to guarantee observability, billing attribution,
+#   and NetworkPolicy selector alignment.
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-standard-labels
+  annotations:
+    policies.kyverno.io/title: Require Standard Labels
+    policies.kyverno.io/category: Best Practices
+    policies.kyverno.io/severity: low
+    policies.kyverno.io/description: >-
+      Mandates standard Kubernetes labels on all workloads for proper inventory
+      and network segmentation.
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: check-workload-labels
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - three-tier
+      validate:
+        message: "Workloads must contain 'app.kubernetes.io/name' and 'app.kubernetes.io/part-of' labels."
+        pattern:
+          metadata:
+            labels:
+              app.kubernetes.io/name: "?*"
+              app.kubernetes.io/part-of: "?*"

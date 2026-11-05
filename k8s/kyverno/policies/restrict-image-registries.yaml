@@ -1,0 +1,46 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/kyverno/policies/restrict-image-registries.yaml — Trusted Registries Only
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# PURPOSE:
+#   Restricts container image pulls strictly to authorized enterprise registries:
+#   1. Project private Amazon ECR repository
+#   2. Official Kubernetes system registry (registry.k8s.io)
+#   3. Official Docker Hub verified library images (e.g. mongo)
+#
+# BLOCKS:
+#   Rogue images from public Docker Hub accounts, personal registries, or
+#   untrusted mirrors.
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: restrict-image-registries
+  annotations:
+    policies.kyverno.io/title: Restrict Image Registries
+    policies.kyverno.io/category: Supply Chain Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: >-
+      Only images from authorized Amazon ECR repositories and trusted
+      official registries are permitted in the three-tier namespace.
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: validate-registry
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - three-tier
+      validate:
+        message: "Images must come from an approved Amazon ECR registry or official verified upstream."
+        pattern:
+          spec:
+            containers:
+              - image: "*.dkr.ecr.*.amazonaws.com/* | registry.k8s.io/* | docker.io/library/* | mongo:*"
+            =(initContainers):
+              - image: "*.dkr.ecr.*.amazonaws.com/* | registry.k8s.io/* | docker.io/library/* | mongo:*"
