@@ -1,0 +1,86 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/kyverno/values.yaml — Production Helm Configuration for Kyverno
+# ─────────────────────────────────────────────────────────────────────────────
+# Reference Chart: kyverno/kyverno (https://kyverno.github.io/kyverno/)
+#
+# PURPOSE:
+#   Deploys Kyverno Policy Engine as an in-cluster admission controller.
+#   Interception points: ValidatingWebhookConfiguration & MutatingWebhookConfiguration.
+#
+# ARCHITECTURAL DECISIONS:
+# 1. High Availability (HA): 2 admission-controller replicas with anti-affinity.
+# 2. Separation of Concerns: Independent controllers for admission, background
+#    scanning, report aggregation, and scheduled cleanups.
+# 3. Observability: Enables Prometheus metrics exporter & ServiceMonitor CRD.
+# 4. Webhook Failure Policy: Ignore on system namespaces (kube-system, argocd),
+#    Fail on application workloads (three-tier).
+# ─────────────────────────────────────────────────────────────────────────────
+
+admissionController:
+  replicas: 2
+  podDisruptionBudget:
+    minAvailable: 1
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+
+  # Metrics for Prometheus scraping
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      additionalLabels:
+        release: kube-prometheus-stack
+      interval: 30s
+
+# Background controller scans pre-existing cluster workloads for violations
+backgroundController:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 512Mi
+
+# Cleanup controller handles TTL and scheduled resource prunes
+cleanupController:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 256Mi
+
+# Reports controller aggregates PolicyReport and ClusterPolicyReport CRDs
+reportsController:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+
+# Namespaces excluded from admission webhooks (prevents cluster deadlock)
+webhooks:
+  autoUpdate:
+    enabled: true

@@ -1,0 +1,12 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/kyverno/kustomization.yaml — Declarative Kyverno Engine Bootstrap
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: kyverno
+
+resources:
+  - namespace.yaml
+  # Official upstream release manifests for Kyverno v1.11.4
+  - https://github.com/kyverno/kyverno/releases/download/v1.11.4/install.yaml
