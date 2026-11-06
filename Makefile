@@ -50,7 +50,7 @@ RESET := \033[0m
 # ─────────────────────────────────────────────────────────────────────────────
 help: ## Show this help message
 	@echo ""
-	@echo "$(BLUE)Three-Tier EKS Portfolio — Make Targets$(RESET)"
+	@echo "$(BLUE)CloudForge EKS Platform — Make Targets$(RESET)"
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 		| sort \

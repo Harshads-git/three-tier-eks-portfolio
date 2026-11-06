@@ -1,8 +1,9 @@
 <div align="center">
 
-# ☸️ Three-Tier EKS Portfolio
+# ⚔️ CloudForge EKS Platform
 
-### Production-grade Kubernetes infrastructure built from scratch over 20 days
+### Production-Grade Cloud Native Platform on AWS EKS
+**GitOps (ArgoCD) • Canary Rollouts (Argo Rollouts) • Zero-Trust Governance (Kyverno, Cosign) • Terraform IaC**
 
 [![CI — Build, Test & Scan](https://img.shields.io/github/actions/workflow/status/Harshads-git/three-tier-eks-portfolio/ci.yml?branch=main&label=CI&logo=github-actions&logoColor=white&color=2ea44f)](https://github.com/Harshads-git/three-tier-eks-portfolio/actions/workflows/ci.yml)
 [![CD — Deploy to EKS](https://img.shields.io/github/actions/workflow/status/Harshads-git/three-tier-eks-portfolio/cd.yml?branch=main&label=CD&logo=github-actions&logoColor=white&color=0075ca)](https://github.com/Harshads-git/three-tier-eks-portfolio/actions/workflows/cd.yml)
@@ -13,7 +14,7 @@
 
 <br/>
 
-**A complete three-tier web application (React + Node.js + MongoDB) deployed on Amazon EKS with full production DevOps tooling: Infrastructure as Code, GitOps CI/CD, zero-trust networking, auto-scaling, observability, and disaster recovery.**
+**CloudForge EKS** is an enterprise-grade cloud-native platform hosting a full three-tier web application (React + Node.js Express + MongoDB) deployed on Amazon EKS. Built from the ground up to demonstrate production platform engineering: automated GitOps continuous reconciliation, zero-downtime canary rollouts with Prometheus analysis, cryptographically attested supply-chain security (Sigstore Cosign & CycloneDX SBOM), dynamic secret synchronization via AWS Secrets Manager & IRSA, shift-left policy admission control (Kyverno), and automated disaster recovery.
 
 [📋 Architecture](#-architecture) • [🚀 Quick Start](#-quick-start) • [⚙️ Tech Stack](#️-technology-stack) • [📂 Structure](#-project-structure) • [📚 Docs](#-documentation)
 
@@ -23,7 +24,7 @@
 
 ## 🎯 What Was Built
 
-This project demonstrates **production-grade DevOps engineering** across a 20-day build — one hour per day, four meaningful commits per day.
+**CloudForge EKS** demonstrates **production-grade platform engineering** across a structured 30-day curriculum — 4 meaningful, architecture-first commits per day.
 
 | Layer | What | Technology |
 |---|---|---|
