@@ -111,3 +111,45 @@ jobs:
             --certificate-identity-regexp "^https://github.com/Harshads-git/three-tier-eks-portfolio.*" \
             --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
             ${{ steps.vars.outputs.frontend_image }}
+
+      # ───────────────────────────────────────────────────────────────────────
+      # SOFTWARE BILL OF MATERIALS (SBOM) & ATTESTATION
+      # ───────────────────────────────────────────────────────────────────────
+      - name: Generate CycloneDX SBOM for Backend
+        run: |
+          echo "Scanning backend image dependencies with Syft..."
+          syft ${{ steps.vars.outputs.backend_image }} -o cyclonedx-json > backend-sbom.cdx.json
+
+      - name: Generate CycloneDX SBOM for Frontend
+        run: |
+          echo "Scanning frontend image dependencies with Syft..."
+          syft ${{ steps.vars.outputs.frontend_image }} -o cyclonedx-json > frontend-sbom.cdx.json
+
+      - name: Attest Backend SBOM via Cosign
+        env:
+          COSIGN_EXPERIMENTAL: "true"
+        run: |
+          echo "Attesting SBOM predicate to backend container in ECR..."
+          cosign attest --yes \
+            --type cyclonedx \
+            --predicate backend-sbom.cdx.json \
+            ${{ steps.vars.outputs.backend_image }}
+
+      - name: Attest Frontend SBOM via Cosign
+        env:
+          COSIGN_EXPERIMENTAL: "true"
+        run: |
+          echo "Attesting SBOM predicate to frontend container in ECR..."
+          cosign attest --yes \
+            --type cyclonedx \
+            --predicate frontend-sbom.cdx.json \
+            ${{ steps.vars.outputs.frontend_image }}
+
+      - name: Upload SBOM Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cyclonedx-reports
+          path: |
+            backend-sbom.cdx.json
+            frontend-sbom.cdx.json
+          retention-days: 30
