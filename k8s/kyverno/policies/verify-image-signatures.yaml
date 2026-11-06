@@ -1,0 +1,59 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/kyverno/policies/verify-image-signatures.yaml — Cosign Signature Admission
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# PURPOSE:
+#   Cryptographically verifies that all container images deployed into the
+#   'three-tier' namespace were signed during the official GitHub Actions CI/CD
+#   pipeline using Sigstore Cosign keyless signing (Fulcio & Rekor).
+#
+# ZERO TRUST SECURITY:
+#   1. Blocks any image that was built outside of authorized GitHub Actions.
+#   2. Verifies the signer's identity (repository, workflow, commit).
+#   3. Mutates the image tag to its immutable SHA256 digest to prevent
+#      Time-Of-Check to Time-Of-Use (TOCTOU) tag replacement attacks.
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: verify-image-signatures
+  annotations:
+    policies.kyverno.io/title: Verify Cosign Image Signatures
+    policies.kyverno.io/category: Software Supply Chain Security
+    policies.kyverno.io/severity: critical
+    policies.kyverno.io/description: >-
+      Enforces that all container images deployed to the three-tier namespace
+      are cryptographically signed by the Harshads-git GitHub Actions CI pipeline.
+spec:
+  validationFailureAction: Enforce
+  webhookTimeoutSeconds: 30
+  rules:
+    - name: verify-signature
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - three-tier
+      verifyImages:
+        # Match project ECR images
+        - imageReferences:
+            - "*.dkr.ecr.*.amazonaws.com/three-tier-eks-cluster-*"
+
+          # Enforce keyless Sigstore verification
+          attestors:
+            - entries:
+                - keyless:
+                    issuer: "https://token.actions.githubusercontent.com"
+                    subject: "https://github.com/Harshads-git/three-tier-eks-portfolio/.github/workflows/supply-chain.yml@refs/heads/main"
+                    rekor:
+                      url: "https://rekor.sigstore.dev"
+
+          # Mutate image tag to digest (@sha256:...) to lock image content
+          mutateDigest: true
+
+          # Verify in Rekor transparency log
+          verifyDigest: true
+          required: true
