@@ -308,7 +308,8 @@ three-tier-eks-portfolio/
 │   ├── ci.yml                       # Test → Build → Trivy → Validate
 │   ├── cd.yml                       # OIDC → ECR push → Rolling deploy
 │   ├── terraform.yml                # Plan-on-PR, Apply-on-merge
-│   └── load-tests.yml               # Weekly k6 performance tests
+│   ├── load-tests.yml               # Weekly k6 performance tests
+│   └── supply-chain.yml             # Cosign keyless signing & Syft SBOM generation
 │
 ├── 📁 k6/load-tests/                # Performance test scripts
 │   ├── smoke-test.js                # 1 VU, 1 min — sanity check
@@ -319,7 +320,9 @@ three-tier-eks-portfolio/
 ├── 📁 scripts/                      # Operational helper scripts
 │   ├── setup-terraform-backend.sh   # Bootstrap S3/DynamoDB state backend
 │   ├── cluster-health-check.sh     # Daily health check with color output
-│   └── k8s-apply.sh                # Ordered manifest deployment with readiness checks
+│   ├── k8s-apply.sh                # Ordered manifest deployment with readiness checks
+│   ├── seed-aws-secrets.sh         # Idempotent AWS Secrets Manager seeding
+│   └── generate-sbom.sh            # Syft CycloneDX and SPDX SBOM generator
 │
 ├── 📁 gitops/                       # ArgoCD GitOps control plane
 │   ├── root-application.yaml        # App-of-Apps master bootstrap manifest
@@ -342,6 +345,7 @@ three-tier-eks-portfolio/
 │   ├── canary-deployments.md        # Progressive Canary delivery with Argo Rollouts
 │   ├── secrets-management.md        # Dynamic secret synchronization via IRSA
 │   ├── policy-as-code.md            # Shift-left admission control policies & compliance
+│   ├── supply-chain-security.md     # Sigstore Cosign signing, SBOM & attestations
 │   └── interview-prep.md            # 12 technical Q&As
 ```
 
@@ -416,6 +420,7 @@ three-tier-eks-portfolio/
 | [Canary Deployments](docs/canary-deployments.md) | Progressive delivery with Argo Rollouts & Prometheus analysis |
 | [Secrets Management (ESO)](docs/secrets-management.md) | Dynamic secret synchronization via AWS Secrets Manager & IRSA |
 | [Policy as Code (Kyverno)](docs/policy-as-code.md) | Shift-left admission control policies & compliance guardrails |
+| [Supply Chain Security](docs/supply-chain-security.md) | Sigstore keyless signing, CycloneDX SBOM & Kyverno admission gates |
 | [Interview Prep](docs/interview-prep.md) | 12 technical Q&As with depth answers |
 
 ---

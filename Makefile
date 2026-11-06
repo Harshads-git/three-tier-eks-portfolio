@@ -24,6 +24,7 @@
         rollout-install rollout-watch rollout-promote rollout-abort rollout-dashboard \
         eso-install eso-status eso-seed eso-sync \
         kyverno-install kyverno-policies kyverno-report kyverno-test \
+        cosign-verify sbom-generate \
         build-backend build-frontend \
         clean
 
@@ -258,6 +259,20 @@ kyverno-test: ## Test policy enforcement by attempting to run a forbidden pod
 	@! kubectl run kyverno-test-pod --image=nginx:latest -n $(NAMESPACE) 2>&1 | grep -q "denied the request" \
 		&& echo "$(GREEN)✓ Success: Prohibited pod was correctly blocked by Kyverno!$(RESET)" \
 		|| echo "$(RED)✗ Warning: Pod was not blocked. Check if Kyverno webhooks are ready.$(RESET)"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SUPPLY CHAIN SECURITY (Cosign & Syft)
+# ─────────────────────────────────────────────────────────────────────────────
+cosign-verify: ## Cryptographically verify image signature with Sigstore keyless OIDC
+	@echo "$(BLUE)Verifying image signature for backend via Sigstore Rekor...$(RESET)"
+	cosign verify \
+		--certificate-identity-regexp "https://github.com/Harshads-git/three-tier-eks-portfolio/.*" \
+		--certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+		$(IMAGE_URI)
+
+sbom-generate: ## Generate CycloneDX and SPDX SBOM for local backend container image
+	chmod +x scripts/generate-sbom.sh
+	./scripts/generate-sbom.sh three-tier-backend:local
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HEALTH & DIAGNOSTICS
