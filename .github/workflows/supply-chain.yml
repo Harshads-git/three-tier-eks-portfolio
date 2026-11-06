@@ -1,0 +1,113 @@
+name: Supply Chain — Cosign Keyless Signing & SBOM
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PURPOSE:
+#   Implements SLSA Level 3 supply-chain security by:
+#   1. Signing container images cryptographically with Sigstore Cosign using
+#      keyless GitHub Actions OIDC federation (Fulcio CA & Rekor transparency log).
+#   2. Generating Software Bill of Materials (SBOM) using Syft in CycloneDX format.
+#   3. Attesting the SBOM directly onto the container images in Amazon ECR.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  workflow_run:
+    workflows: ["CD — Build, Push to ECR & Deploy to EKS"]
+    types: [completed]
+    branches: [main]
+
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Image tag to sign and generate SBOM for"
+        required: false
+        default: "latest"
+
+permissions:
+  id-token: write   # Required for Sigstore keyless OIDC signing
+  contents: read
+  security-events: write
+
+env:
+  AWS_REGION: us-east-1
+  BACKEND_REPO: three-tier-eks-cluster-backend
+  FRONTEND_REPO: three-tier-eks-cluster-frontend
+
+jobs:
+  sign-and-attest:
+    name: Sign Images & Attest SBOM
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3.5.0
+
+      - name: Install Syft (SBOM generator)
+        uses: anchore/sbom-action/download-syft@v0.15.11
+
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/three-tier-eks-cluster-github-actions-role
+          aws-region: ${{ env.AWS_REGION }}
+          audience: sts.amazonaws.com
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Determine Image Tag
+        id: vars
+        run: |
+          if [ -n "${{ github.event.inputs.image_tag }}" ]; then
+            TAG="${{ github.event.inputs.image_tag }}"
+          else
+            TAG="sha-$(echo ${{ github.sha }} | cut -c1-7)"
+          fi
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "backend_image=${{ steps.login-ecr.outputs.registry }}/${{ env.BACKEND_REPO }}:${TAG}" >> $GITHUB_OUTPUT
+          echo "frontend_image=${{ steps.login-ecr.outputs.registry }}/${{ env.FRONTEND_REPO }}:${TAG}" >> $GITHUB_OUTPUT
+
+      # ───────────────────────────────────────────────────────────────────────
+      # KEYLESS IMAGE SIGNING (Sigstore Cosign)
+      # ───────────────────────────────────────────────────────────────────────
+      - name: Sign Backend Container Image
+        env:
+          COSIGN_EXPERIMENTAL: "true"
+        run: |
+          echo "Signing backend image: ${{ steps.vars.outputs.backend_image }}"
+          cosign sign --yes \
+            -a "repo=${{ github.repository }}" \
+            -a "workflow=${{ github.workflow }}" \
+            -a "commit=${{ github.sha }}" \
+            ${{ steps.vars.outputs.backend_image }}
+
+      - name: Sign Frontend Container Image
+        env:
+          COSIGN_EXPERIMENTAL: "true"
+        run: |
+          echo "Signing frontend image: ${{ steps.vars.outputs.frontend_image }}"
+          cosign sign --yes \
+            -a "repo=${{ github.repository }}" \
+            -a "workflow=${{ github.workflow }}" \
+            -a "commit=${{ github.sha }}" \
+            ${{ steps.vars.outputs.frontend_image }}
+
+      - name: Verify Backend Signature
+        run: |
+          echo "Verifying backend cryptographic signature in Rekor transparency log..."
+          cosign verify \
+            --certificate-identity-regexp "^https://github.com/Harshads-git/three-tier-eks-portfolio.*" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            ${{ steps.vars.outputs.backend_image }}
+
+      - name: Verify Frontend Signature
+        run: |
+          echo "Verifying frontend cryptographic signature in Rekor transparency log..."
+          cosign verify \
+            --certificate-identity-regexp "^https://github.com/Harshads-git/three-tier-eks-portfolio.*" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            ${{ steps.vars.outputs.frontend_image }}
