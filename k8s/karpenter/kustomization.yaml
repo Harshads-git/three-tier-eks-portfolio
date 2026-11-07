@@ -9,6 +9,7 @@ namespace: karpenter
 resources:
   - namespace.yaml
   - ec2nodeclass.yaml
+  - nodepool.yaml
   # Official upstream release manifests for Karpenter v0.35.0 (v1beta1/v1)
   - https://raw.githubusercontent.com/aws/karpenter-provider-aws/v0.35.0/pkg/apis/crds/karpenter.sh_nodepools.yaml
   - https://raw.githubusercontent.com/aws/karpenter-provider-aws/v0.35.0/pkg/apis/crds/karpenter.k8s.aws_ec2nodeclasses.yaml

@@ -1,0 +1,82 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/karpenter/nodepool.yaml — Karpenter NodePool Scheduling & Disruption Spec
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# PURPOSE:
+#   Defines workload provisioning rules, instance type diversification,
+#   Spot/On-Demand pricing strategies, and aggressive cost consolidation policies.
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: karpenter.sh/v1beta1
+kind: NodePool
+metadata:
+  name: default
+  labels:
+    app.kubernetes.io/name: default-nodepool
+    app.kubernetes.io/part-of: karpenter-autoscaler
+
+spec:
+  # Link to the AWS-specific EC2NodeClass defined in ec2nodeclass.yaml
+  template:
+    metadata:
+      labels:
+        billing-tier: three-tier-workloads
+        managed-by: karpenter
+
+    spec:
+      nodeClassRef:
+        name: default
+
+      # Workload scheduling constraints
+      requirements:
+        # Prioritize Spot instances for up to 70-80% cost reduction;
+        # automatically fallback to On-Demand if Spot pool has zero availability.
+        - key: "karpenter.sh/capacity-type"
+          operator: In
+          values: ["spot", "on-demand"]
+
+        # Architecture: 64-bit x86 architecture
+        - key: "kubernetes.io/arch"
+          operator: In
+          values: ["amd64"]
+
+        # Instance Categories: Compute (c), General Purpose (m), Burstable (t)
+        - key: "karpenter.k8s.aws/instance-category"
+          operator: In
+          values: ["c", "m", "t"]
+
+        # Modern instance generations (excludes older generations like c3/m3)
+        - key: "karpenter.k8s.aws/instance-generation"
+          operator: Gt
+          values: ["2"]
+
+        # Avoid hyper-expensive metal or GPU instances for standard microservices
+        - key: "karpenter.k8s.aws/instance-size"
+          operator: NotIn
+          values: ["metal", "24xlarge", "32xlarge"]
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # DISRUPTION & COST CONSOLIDATION
+  # ───────────────────────────────────────────────────────────────────────────
+  disruption:
+    # WhenEmptyOrUnderutilized: Karpenter continuously calculates if pods can
+    # be rescheduled onto fewer nodes or replaced with cheaper instances.
+    consolidationPolicy: WhenEmptyOrUnderutilized
+    consolidateAfter: 30s
+
+    # Maximum node lifetime: forces node rotation every 30 days for OS patching
+    expireAfter: 720h
+
+    # Disruption budgets safeguard availability during consolidation
+    budgets:
+      - nodes: "20%" # Disrupt at most 20% of the nodes concurrently
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # RESOURCE CEILINGS (Cost Guardrails)
+  # ───────────────────────────────────────────────────────────────────────────
+  limits:
+    cpu: "100"
+    memory: 256Gi
+
+  # Weight: evaluation priority among multiple NodePools
+  weight: 10
