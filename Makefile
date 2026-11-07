@@ -25,6 +25,7 @@
         eso-install eso-status eso-seed eso-sync \
         kyverno-install kyverno-policies kyverno-report kyverno-test \
         cosign-verify sbom-generate \
+        karpenter-install karpenter-nodepool karpenter-nodes karpenter-logs \
         build-backend build-frontend \
         clean
 
@@ -273,6 +274,26 @@ cosign-verify: ## Cryptographically verify image signature with Sigstore keyless
 sbom-generate: ## Generate CycloneDX and SPDX SBOM for local backend container image
 	chmod +x scripts/generate-sbom.sh
 	./scripts/generate-sbom.sh three-tier-backend:local
+
+# ─────────────────────────────────────────────────────────────────────────────
+# NEXT-GEN AUTOSCALING (Karpenter v1)
+# ─────────────────────────────────────────────────────────────────────────────
+karpenter-install: ## Install Karpenter v1 CRDs and controller via Kustomize
+	@echo "$(BLUE)Installing Karpenter v1 Autoscaler...$(RESET)"
+	kubectl apply -k k8s/karpenter/
+	@echo "$(GREEN)✓ Karpenter CRDs and controller installed.$(RESET)"
+
+karpenter-nodepool: ## Apply NodePool and EC2NodeClass autoscaling manifests
+	@echo "$(BLUE)Configuring Karpenter NodePool & EC2NodeClass...$(RESET)"
+	kubectl apply -f k8s/karpenter/ec2nodeclass.yaml
+	kubectl apply -f k8s/karpenter/nodepool.yaml
+	@echo "$(GREEN)✓ Karpenter NodePool active (Spot prioritized, consolidation enabled).$(RESET)"
+
+karpenter-nodes: ## List worker nodes dynamically managed by Karpenter
+	kubectl get nodes -l managed-by=karpenter -o wide
+
+karpenter-logs: ## Follow live Karpenter provisioning and consolidation logs
+	kubectl logs -f -n karpenter -l app.kubernetes.io/name=karpenter -c controller
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HEALTH & DIAGNOSTICS

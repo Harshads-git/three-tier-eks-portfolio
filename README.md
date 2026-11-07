@@ -290,6 +290,7 @@ three-tier-eks-portfolio/
 │   ├── rollouts/                    # Argo Rollouts Canary & AnalysisTemplates
 │   ├── external-secrets/            # External Secrets Operator & AWS Secrets Manager sync
 │   ├── kyverno/                     # Kyverno Admission Controller & ClusterPolicies
+│   ├── karpenter/                   # Karpenter v1 NodePool & EC2NodeClass specs
 │   ├── network-policies/            # Zero-trust NetworkPolicies
 │   ├── pdb/                         # PodDisruptionBudgets
 │   ├── resource-quota/              # ResourceQuota + LimitRange
@@ -300,6 +301,7 @@ three-tier-eks-portfolio/
 │   ├── eks.tf                       # EKS cluster + node groups
 │   ├── ecr.tf                       # Container registries
 │   ├── iam.tf                       # IRSA roles (GitHub, ALB, CA, EBS)
+│   ├── karpenter.tf                 # Karpenter IRSA, SQS interruption queue, Node Role
 │   ├── helm.tf                      # Helm releases (ALB ctrl, CA, metrics)
 │   ├── variables.tf                 # Input variables
 │   ├── outputs.tf                   # Output values (ECR URLs, cluster name)
@@ -347,6 +349,7 @@ three-tier-eks-portfolio/
 │   ├── secrets-management.md        # Dynamic secret synchronization via IRSA
 │   ├── policy-as-code.md            # Shift-left admission control policies & compliance
 │   ├── supply-chain-security.md     # Sigstore Cosign signing, SBOM & attestations
+│   ├── karpenter-autoscaling.md     # Next-gen just-in-time node provisioning & Spot consolidation
 │   └── interview-prep.md            # 12 technical Q&As
 ```
 
@@ -422,6 +425,7 @@ three-tier-eks-portfolio/
 | [Secrets Management (ESO)](docs/secrets-management.md) | Dynamic secret synchronization via AWS Secrets Manager & IRSA |
 | [Policy as Code (Kyverno)](docs/policy-as-code.md) | Shift-left admission control policies & compliance guardrails |
 | [Supply Chain Security](docs/supply-chain-security.md) | Sigstore keyless signing, CycloneDX SBOM & Kyverno admission gates |
+| [Karpenter Autoscaling](docs/karpenter-autoscaling.md) | Next-gen just-in-time node provisioning & Spot consolidation |
 | [Interview Prep](docs/interview-prep.md) | 12 technical Q&As with depth answers |
 
 ---
@@ -437,7 +441,7 @@ three-tier-eks-portfolio/
 | **Operations & SRE** | 16–17 | Runbook, Cost Analysis, Health Checks, Disaster Recovery, Diagrams | ✅ Done |
 | **Showcase & DX** | 18–20 | Master README, Makefile, .pre-commit, `k8s-apply.sh`, Validation & Retrospective | ✅ Done |
 | **Advanced GitOps & Secrets**| 21–23 | ArgoCD App-of-Apps, Canary Rollouts, External Secrets Operator | ✅ Done |
-| **Enterprise Governance**| 24–26 | Kyverno Policy-as-Code, Cosign Image Signing, SBOM, Karpenter v1 | 🔄 In Progress |
+| **Enterprise Governance & Scaling**| 24–26 | Kyverno Policy-as-Code, Cosign Image Signing, SBOM, Karpenter v1 | ✅ Done |
 | **Observability & DR** | 27–30 | OpenTelemetry Distributed Tracing, Chaos Testing, Velero Backup | 📋 Planned |
 
 **4 commits/day with architecture-first commit bodies explaining the WHY.**
