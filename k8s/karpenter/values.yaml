@@ -1,0 +1,41 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/karpenter/values.yaml — Production Helm Configuration for Karpenter v1
+# ─────────────────────────────────────────────────────────────────────────────
+# Reference Chart: oci://public.ecr.aws/karpenter/karpenter
+#
+# ARCHITECTURAL DESIGN:
+# 1. Controller HA: 2 controller replicas with active leader election.
+# 2. Event-Driven Interruption: Connected to SQS interruption queue.
+# 3. Observability: ServiceMonitor for Prometheus scraping on port 8000.
+# ─────────────────────────────────────────────────────────────────────────────
+
+serviceAccount:
+  create: true
+  name: karpenter
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/three-tier-eks-cluster-karpenter-controller-role
+
+replicas: 2
+
+settings:
+  clusterName: three-tier-eks-cluster
+  clusterEndpoint: "https://EXAMPLE.gr7.us-east-1.eks.amazonaws.com"
+  interruptionQueue: "three-tier-eks-cluster-karpenter-interruption"
+  featureGates:
+    spotToSpotConsolidation: true
+
+resources:
+  requests:
+    cpu: 200m
+    memory: 512Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+
+controller:
+  metrics:
+    port: 8000
+  serviceMonitor:
+    enabled: true
+    additionalLabels:
+      release: kube-prometheus-stack

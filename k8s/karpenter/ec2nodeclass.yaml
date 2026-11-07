@@ -1,0 +1,61 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/karpenter/ec2nodeclass.yaml — AWS-Specific Node Infrastructure Spec
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# PURPOSE:
+#   Configures the AWS EC2 configuration for dynamically provisioned nodes:
+#   - Subnet and Security Group auto-discovery via tags
+#   - Storage specs (gp3 volumes, encryption at rest)
+#   - IMDSv2 metadata enforcement (CIS Benchmark)
+#   - Instance Profile / Role attachment
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: karpenter.k8s.aws/v1beta1
+kind: EC2NodeClass
+metadata:
+  name: default
+  labels:
+    app.kubernetes.io/name: default-nodeclass
+    app.kubernetes.io/part-of: karpenter-autoscaler
+
+spec:
+  # Amazon Linux 2023 optimized for EKS
+  amiFamily: AL2023
+
+  # IAM Role assumed by the provisioned EC2 worker nodes
+  role: "three-tier-eks-cluster-karpenter-node-role"
+
+  # Auto-discover private subnets tagged during VPC creation (Day 9)
+  subnetSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: "three-tier-eks-cluster"
+
+  # Auto-discover EKS cluster security group
+  securityGroupSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: "three-tier-eks-cluster"
+
+  # Storage configuration: Encrypted gp3 with optimized IOPS
+  blockDeviceMappings:
+    - deviceName: /dev/xvda
+      ebs:
+        volumeSize: 20Gi
+        volumeType: gp3
+        iops: 3000
+        throughput: 125
+        encrypted: true
+        deleteOnTermination: true
+
+  # Security Hardening: Enforce IMDSv2 (Blocks SSRF attacks)
+  metadataOptions:
+    httpEndpoint: enabled
+    httpProtocolIPv6: disabled
+    httpPutResponseHopLimit: 2 # Required for IRSA token projection
+    httpTokens: required       # Mandates IMDSv2 token session
+
+  # AWS EC2 tags applied to all provisioned nodes
+  tags:
+    Name: "three-tier-eks-karpenter-node"
+    Environment: "production"
+    ManagedBy: "Karpenter"
+    Project: "three-tier-eks"
