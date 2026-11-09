@@ -66,6 +66,9 @@
 
 "use strict";
 
+// Initialize OpenTelemetry Tracing BEFORE importing Express or Mongoose
+require("./tracer");
+
 const express = require("express");
 const cors = require("cors");
 const connectToDatabase = require("./db");
