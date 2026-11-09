@@ -294,7 +294,9 @@ three-tier-eks-portfolio/
 │   ├── network-policies/            # Zero-trust NetworkPolicies
 │   ├── pdb/                         # PodDisruptionBudgets
 │   ├── resource-quota/              # ResourceQuota + LimitRange
-│   └── monitoring/                  # Prometheus stack values, ServiceMonitors
+│   └── monitoring/                  # Prometheus stack, ServiceMonitors
+│       ├── opentelemetry/           # OpenTelemetry Collector deployment & pipeline
+│       └── jaeger/                  # Jaeger distributed trace store & query UI
 │
 ├── 📁 terraform/                    # Infrastructure as Code
 │   ├── main.tf                      # VPC module configuration
@@ -350,6 +352,7 @@ three-tier-eks-portfolio/
 │   ├── policy-as-code.md            # Shift-left admission control policies & compliance
 │   ├── supply-chain-security.md     # Sigstore Cosign signing, SBOM & attestations
 │   ├── karpenter-autoscaling.md     # Next-gen just-in-time node provisioning & Spot consolidation
+│   ├── distributed-tracing.md       # Request waterfalls & profiling via OpenTelemetry & Jaeger
 │   └── interview-prep.md            # 12 technical Q&As
 ```
 
@@ -426,6 +429,7 @@ three-tier-eks-portfolio/
 | [Policy as Code (Kyverno)](docs/policy-as-code.md) | Shift-left admission control policies & compliance guardrails |
 | [Supply Chain Security](docs/supply-chain-security.md) | Sigstore keyless signing, CycloneDX SBOM & Kyverno admission gates |
 | [Karpenter Autoscaling](docs/karpenter-autoscaling.md) | Next-gen just-in-time node provisioning & Spot consolidation |
+| [Distributed Tracing](docs/distributed-tracing.md) | Request waterfalls & profiling via OpenTelemetry & Jaeger |
 | [Interview Prep](docs/interview-prep.md) | 12 technical Q&As with depth answers |
 
 ---
@@ -442,7 +446,7 @@ three-tier-eks-portfolio/
 | **Showcase & DX** | 18–20 | Master README, Makefile, .pre-commit, `k8s-apply.sh`, Validation & Retrospective | ✅ Done |
 | **Advanced GitOps & Secrets**| 21–23 | ArgoCD App-of-Apps, Canary Rollouts, External Secrets Operator | ✅ Done |
 | **Enterprise Governance & Scaling**| 24–26 | Kyverno Policy-as-Code, Cosign Image Signing, SBOM, Karpenter v1 | ✅ Done |
-| **Observability & DR** | 27–30 | OpenTelemetry Distributed Tracing, Chaos Testing, Velero Backup | 📋 Planned |
+| **Observability & Resilience** | 27–30 | OpenTelemetry Distributed Tracing, Chaos Testing, Velero Backup | 🔄 In Progress |
 
 **4 commits/day with architecture-first commit bodies explaining the WHY.**
 

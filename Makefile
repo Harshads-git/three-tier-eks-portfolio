@@ -26,6 +26,7 @@
         kyverno-install kyverno-policies kyverno-report kyverno-test \
         cosign-verify sbom-generate \
         karpenter-install karpenter-nodepool karpenter-nodes karpenter-logs \
+        tracing-install jaeger-ui otel-logs \
         build-backend build-frontend \
         clean
 
@@ -294,6 +295,22 @@ karpenter-nodes: ## List worker nodes dynamically managed by Karpenter
 
 karpenter-logs: ## Follow live Karpenter provisioning and consolidation logs
 	kubectl logs -f -n karpenter -l app.kubernetes.io/name=karpenter -c controller
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DISTRIBUTED TRACING (OpenTelemetry & Jaeger)
+# ─────────────────────────────────────────────────────────────────────────────
+tracing-install: ## Deploy OpenTelemetry Collector and Jaeger tracing backend
+	@echo "$(BLUE)Deploying OpenTelemetry Collector & Jaeger...$(RESET)"
+	kubectl apply -k k8s/monitoring/opentelemetry/
+	kubectl apply -k k8s/monitoring/jaeger/
+	@echo "$(GREEN)✓ Distributed tracing pipeline installed in namespace monitoring.$(RESET)"
+
+jaeger-ui: ## Port-forward Jaeger Web UI to http://localhost:16686
+	@echo "$(GREEN)Opening Jaeger Tracing UI at http://localhost:16686$(RESET)"
+	kubectl port-forward svc/jaeger-query 16686:16686 -n monitoring
+
+otel-logs: ## Stream OpenTelemetry Collector logs to verify span ingestion
+	kubectl logs -f -n monitoring -l app.kubernetes.io/name=otel-collector
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HEALTH & DIAGNOSTICS
