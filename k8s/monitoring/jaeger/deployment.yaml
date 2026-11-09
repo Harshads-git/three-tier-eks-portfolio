@@ -1,0 +1,91 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/monitoring/jaeger/deployment.yaml — Jaeger Tracing Backend & Query UI
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# PURPOSE:
+#   Deploys Jaeger backend with all-in-one OTLP ingestion, in-memory span
+#   storage, and full interactive UI for visualizing distributed request waterfalls.
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jaeger
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: jaeger
+    app.kubernetes.io/part-of: observability-platform
+
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jaeger
+
+  template:
+    metadata:
+      labels:
+        app: jaeger
+        app.kubernetes.io/name: jaeger
+
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+
+      containers:
+        - name: jaeger
+          image: jaegertracing/all-in-one:1.55.0
+          imagePullPolicy: IfNotPresent
+
+          env:
+            - name: COLLECTOR_OTLP_ENABLED
+              value: "true"
+            - name: SPAN_STORAGE_TYPE
+              value: "memory"
+            - name: MEMORY_MAX_TRACES
+              value: "100000"
+
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi
+
+          ports:
+            # Query & Web UI
+            - name: query-ui
+              containerPort: 16686
+              protocol: TCP
+            # OTLP gRPC receiver (from OpenTelemetry collector)
+            - name: otlp-grpc
+              containerPort: 4317
+              protocol: TCP
+            # OTLP HTTP receiver
+            - name: otlp-http
+              containerPort: 4318
+              protocol: TCP
+
+          livenessProbe:
+            httpGet:
+              path: /
+              port: query-ui
+            initialDelaySeconds: 15
+            periodSeconds: 10
+
+          readinessProbe:
+            httpGet:
+              path: /
+              port: query-ui
+            initialDelaySeconds: 10
+            periodSeconds: 5
