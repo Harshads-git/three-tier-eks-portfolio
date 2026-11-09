@@ -1,0 +1,94 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/monitoring/opentelemetry/deployment.yaml — OpenTelemetry Collector Deployment
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-collector
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: otel-collector
+    app.kubernetes.io/part-of: observability-platform
+
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: otel-collector
+
+  template:
+    metadata:
+      labels:
+        app: otel-collector
+        app.kubernetes.io/name: otel-collector
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8888"
+
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+
+      containers:
+        - name: otel-collector
+          image: otel/opentelemetry-collector-contrib:0.96.0
+          imagePullPolicy: IfNotPresent
+
+          command:
+            - "/otelcol-contrib"
+            - "--config=/conf/otel-collector-config.yaml"
+
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+          ports:
+            - name: otlp-grpc
+              containerPort: 4317
+              protocol: TCP
+            - name: otlp-http
+              containerPort: 4318
+              protocol: TCP
+            - name: metrics
+              containerPort: 8888
+              protocol: TCP
+            - name: health
+              containerPort: 13133
+              protocol: TCP
+
+          livenessProbe:
+            httpGet:
+              path: /
+              port: health
+            initialDelaySeconds: 15
+            periodSeconds: 10
+
+          readinessProbe:
+            httpGet:
+              path: /
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 5
+
+          volumeMounts:
+            - name: config
+              mountPath: /conf
+
+      volumes:
+        - name: config
+          configMap:
+            name: otel-collector-config
