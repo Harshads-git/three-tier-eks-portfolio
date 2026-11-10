@@ -1,0 +1,58 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/chaos/experiments/network-latency-experiment.yaml — Cross-Tier Latency Test
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# HYPOTHESIS:
+#   When synthetic network latency (250ms ± 20ms jitter) is injected between
+#   the Node.js backend tier and MongoDB database tier:
+#   1. Connection pooling prevents socket starvation.
+#   2. HTTP client requests remain within the 2.5s timeout budget.
+#   3. OpenTelemetry distributed traces clearly capture the elevated db.client
+#      span duration without breaking distributed trace propagation.
+#
+# EXPERIMENT BEHAVIOR:
+#   - Injects 250ms roundtrip delay with 20ms jitter on all TCP traffic destined
+#     for mongodb:27017 from the backend tier.
+#   - Fault injection active for 3 minutes.
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: backend-db-network-latency
+  namespace: three-tier
+  labels:
+    app.kubernetes.io/name: backend-db-network-latency
+    app.kubernetes.io/part-of: chaos-experiments
+    chaos.cloudforge.internal/tier: data
+
+spec:
+  # Fault injection action
+  action: delay
+  mode: all
+
+  # Target traffic originating from backend pods
+  selector:
+    namespaces:
+      - three-tier
+    labelSelectors:
+      app: backend
+
+  # Direction of delayed traffic: egress from backend to target database
+  direction: to
+
+  target:
+    selector:
+      namespaces:
+        - three-tier
+      labelSelectors:
+        app: mongodb
+    mode: all
+
+  # Latency injection parameters
+  delay:
+    latency: "250ms"
+    jitter: "20ms"
+    correlation: "25"
+
+  duration: "3m"

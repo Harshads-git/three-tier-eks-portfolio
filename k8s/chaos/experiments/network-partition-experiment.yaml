@@ -1,0 +1,53 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/chaos/experiments/network-partition-experiment.yaml — Split-Brain Isolation
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# HYPOTHESIS:
+#   When a network partition is created between the React frontend tier and
+#   Node.js backend tier:
+#   1. React frontend UI gracefully displays cached state or connection warning
+#      without hard crashing the browser application runtime.
+#   2. AWS Application Load Balancer health checks on frontend remain 200 OK.
+#   3. Network recovery restores communication within 5 seconds of partition tear-down.
+#
+# EXPERIMENT BEHAVIOR:
+#   - Drops 100% of packets exchanged between frontend pods and backend pods.
+#   - Simulates cross-AZ transit gateway failure or security group misconfiguration.
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: frontend-backend-partition
+  namespace: three-tier
+  labels:
+    app.kubernetes.io/name: frontend-backend-partition
+    app.kubernetes.io/part-of: chaos-experiments
+    chaos.cloudforge.internal/tier: web
+
+spec:
+  # Action: drop packets to simulate total network partition
+  action: partition
+  mode: all
+
+  # Source selector: frontend tier
+  selector:
+    namespaces:
+      - three-tier
+    labelSelectors:
+      app: frontend
+
+  # Direction: bidirectional isolation
+  direction: both
+
+  # Target selector: backend API tier
+  target:
+    selector:
+      namespaces:
+        - three-tier
+      labelSelectors:
+        app: backend
+    mode: all
+
+  # Fault injection duration
+  duration: "2m"
