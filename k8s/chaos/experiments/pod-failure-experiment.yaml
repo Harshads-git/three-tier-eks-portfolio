@@ -1,0 +1,41 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/chaos/experiments/pod-failure-experiment.yaml — PDB Resilience Validation
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# HYPOTHESIS:
+#   When backend API pods are abruptly killed under active k6 load, the
+#   PodDisruptionBudget (minAvailable: 1) and ALB target group health checks
+#   will prevent service degradation. Zero HTTP 5xx errors will be observed.
+#
+# EXPERIMENT BEHAVIOR:
+#   - Randomly terminates backend pods every 60 seconds over a 5-minute window.
+#   - At most 1 pod is disrupted concurrently (mode: one / 50%).
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: backend-pod-failure
+  namespace: three-tier
+  labels:
+    app.kubernetes.io/name: backend-pod-failure
+    app.kubernetes.io/part-of: chaos-experiments
+
+spec:
+  # Action: randomly kill pods with SIGKILL to simulate node crash or hardware fault
+  action: pod-kill
+  mode: fixed
+  value: "1"
+
+  selector:
+    namespaces:
+      - three-tier
+    labelSelectors:
+      app: backend
+
+  # Duration of the fault injection cycle
+  duration: "5m"
+
+  # Schedule: runs repeatedly every 2 minutes
+  scheduler:
+    cron: "*/2 * * * *"
