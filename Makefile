@@ -27,6 +27,7 @@
         cosign-verify sbom-generate \
         karpenter-install karpenter-nodepool karpenter-nodes karpenter-logs \
         tracing-install jaeger-ui otel-logs \
+        chaos-install chaos-dashboard chaos-pod-kill chaos-latency chaos-clean \
         build-backend build-frontend \
         clean
 
@@ -311,6 +312,32 @@ jaeger-ui: ## Port-forward Jaeger Web UI to http://localhost:16686
 
 otel-logs: ## Stream OpenTelemetry Collector logs to verify span ingestion
 	kubectl logs -f -n monitoring -l app.kubernetes.io/name=otel-collector
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CHAOS ENGINEERING & RESILIENCE (Chaos Mesh)
+# ─────────────────────────────────────────────────────────────────────────────
+chaos-install: ## Deploy Chaos Mesh operator stack via Kustomize
+	@echo "$(BLUE)Deploying Chaos Mesh operator...$(RESET)"
+	kubectl apply -k k8s/chaos/
+	@echo "$(GREEN)✓ Chaos Mesh deployed. Waiting for controller-manager...$(RESET)"
+	kubectl rollout status deployment/chaos-controller-manager -n chaos-mesh --timeout=120s
+
+chaos-dashboard: ## Port-forward Chaos Mesh dashboard to http://localhost:2333
+	@echo "$(GREEN)Opening Chaos Mesh Dashboard at http://localhost:2333$(RESET)"
+	kubectl port-forward svc/chaos-dashboard 2333:2333 -n chaos-mesh
+
+chaos-pod-kill: ## Run automated PodChaos experiment (kill backend pod under load)
+	chmod +x scripts/run-chaos-experiment.sh
+	./scripts/run-chaos-experiment.sh backend-pod-failure
+
+chaos-latency: ## Inject 250ms cross-tier latency between backend and MongoDB
+	chmod +x scripts/run-chaos-experiment.sh
+	./scripts/run-chaos-experiment.sh backend-db-network-latency
+
+chaos-clean: ## Purge all active chaos experiments across the cluster
+	@echo "$(BLUE)Purging active chaos experiments...$(RESET)"
+	kubectl delete podchaos,networkchaos,stresschaos --all -n $(NAMESPACE) 2>/dev/null || true
+	@echo "$(GREEN)✓ All chaos experiments removed.$(RESET)"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HEALTH & DIAGNOSTICS

@@ -291,6 +291,7 @@ three-tier-eks-portfolio/
 │   ├── external-secrets/            # External Secrets Operator & AWS Secrets Manager sync
 │   ├── kyverno/                     # Kyverno Admission Controller & ClusterPolicies
 │   ├── karpenter/                   # Karpenter v1 NodePool & EC2NodeClass specs
+│   ├── chaos/                       # Chaos Mesh operator & Pod/NetworkChaos experiments
 │   ├── network-policies/            # Zero-trust NetworkPolicies
 │   ├── pdb/                         # PodDisruptionBudgets
 │   ├── resource-quota/              # ResourceQuota + LimitRange
@@ -327,7 +328,8 @@ three-tier-eks-portfolio/
 │   ├── cluster-health-check.sh     # Daily health check with color output
 │   ├── k8s-apply.sh                # Ordered manifest deployment with readiness checks
 │   ├── seed-aws-secrets.sh         # Idempotent AWS Secrets Manager seeding
-│   └── generate-sbom.sh            # Syft CycloneDX and SPDX SBOM generator
+│   ├── generate-sbom.sh            # Syft CycloneDX and SPDX SBOM generator
+│   └── run-chaos-experiment.sh     # Automated Chaos Mesh test harness & metric audit
 │
 ├── 📁 gitops/                       # ArgoCD GitOps control plane
 │   ├── root-application.yaml        # App-of-Apps master bootstrap manifest
@@ -430,6 +432,7 @@ three-tier-eks-portfolio/
 | [Supply Chain Security](docs/supply-chain-security.md) | Sigstore keyless signing, CycloneDX SBOM & Kyverno admission gates |
 | [Karpenter Autoscaling](docs/karpenter-autoscaling.md) | Next-gen just-in-time node provisioning & Spot consolidation |
 | [Distributed Tracing](docs/distributed-tracing.md) | Request waterfalls & profiling via OpenTelemetry & Jaeger |
+| [Chaos Engineering](docs/chaos-experiments.md) | Chaos Mesh fault injection, PDB resilience & failure recovery audit |
 | [Interview Prep](docs/interview-prep.md) | 12 technical Q&As with depth answers |
 
 ---
