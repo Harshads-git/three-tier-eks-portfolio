@@ -1,0 +1,13 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/chaos/kustomization.yaml — Declarative Chaos Mesh Bootstrap
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: chaos-mesh
+
+resources:
+  - namespace.yaml
+  - rbac.yaml
+  # Official upstream release manifests for Chaos Mesh v2.6.2
+  - https://mirrors.chaos-mesh.org/v2.6.2/install.yaml

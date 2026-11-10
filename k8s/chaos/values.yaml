@@ -1,0 +1,59 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/chaos/values.yaml — Helm Configuration for Chaos Mesh Operator
+# ─────────────────────────────────────────────────────────────────────────────
+# Reference Chart: chaos-mesh/chaos-mesh (https://charts.chaos-mesh.org)
+#
+# PURPOSE:
+#   Deploys Chaos Mesh operator into Amazon EKS to run automated chaos injection
+#   experiments (pod termination, network delay, packet loss, stress testing).
+#
+# BLAST RADIUS CONTAINMENT:
+#   - Scoped strictly to target namespace: three-tier
+#   - Never allowed to target control plane, kube-system, or monitoring namespaces!
+# ─────────────────────────────────────────────────────────────────────────────
+
+controllerManager:
+  replicaCount: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+
+  # Security blast radius: restrict chaos injections to three-tier
+  targetNamespace: "three-tier"
+
+  metrics:
+    serviceMonitor:
+      enabled: true
+      additionalLabels:
+        release: kube-prometheus-stack
+
+chaosDaemon:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+dashboard:
+  create: true
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  service:
+    type: ClusterIP
+    port: 2333

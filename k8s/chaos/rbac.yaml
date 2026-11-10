@@ -1,0 +1,33 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/chaos/rbac.yaml — Role-Based Access Control for Chaos Injections
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: chaos-mesh-experiment-role
+  namespace: three-tier
+  labels:
+    app.kubernetes.io/name: chaos-mesh
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/exec", "pods/log"]
+    verbs: ["get", "list", "watch", "delete", "create"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets"]
+    verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: chaos-mesh-experiment-binding
+  namespace: three-tier
+subjects:
+  - kind: ServiceAccount
+    name: chaos-controller-manager
+    namespace: chaos-mesh
+roleRef:
+  kind: Role
+  name: chaos-mesh-experiment-role
+  apiGroup: rbac.authorization.k8s.io
