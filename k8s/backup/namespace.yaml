@@ -1,0 +1,11 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/backup/namespace.yaml — Velero Disaster Recovery Namespace
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: velero
+  labels:
+    app.kubernetes.io/name: velero
+    app.kubernetes.io/part-of: cloudforge-platform
+    app.kubernetes.io/component: disaster-recovery

@@ -1,0 +1,60 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/backup/values.yaml — Velero Helm Chart Values (AWS Provider)
+# ─────────────────────────────────────────────────────────────────────────────
+# Chart: vmware-tanzu/velero
+# Version: 6.7.0 (Velero v1.14.0)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Image settings
+image:
+  repository: velero/velero
+  tag: v1.14.0
+  pullPolicy: IfNotPresent
+
+# Plugins: AWS Plugin provides S3 ObjectStorage & EC2 EBS VolumeSnapshotter
+initContainers:
+  - name: velero-plugin-for-aws
+    image: velero/velero-plugin-for-aws:v1.9.2
+    imagePullPolicy: IfNotPresent
+    volumeMounts:
+      - mountPath: /plugins
+        name: plugins
+
+# Configuration for Backup & Snapshot locations
+configuration:
+  backupStorageLocation:
+    - name: default
+      provider: aws
+      bucket: three-tier-eks-cluster-velero-backups
+      prefix: backups
+      config:
+        region: us-east-1
+  volumeSnapshotLocation:
+    - name: default
+      provider: aws
+      config:
+        region: us-east-1
+
+# Use existing ServiceAccount with IRSA annotations
+serviceAccount:
+  server:
+    create: false
+    name: velero-server
+
+# Resource allocations
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# Metrics for Prometheus scraping
+metrics:
+  enabled: true
+  scrapeInterval: 30s
+  serviceMonitor:
+    enabled: true
+    additionalLabels:
+      release: kube-prometheus-stack

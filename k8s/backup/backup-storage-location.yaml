@@ -1,0 +1,20 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/backup/backup-storage-location.yaml — Default S3 Storage Location
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: velero.io/v1
+kind: BackupStorageLocation
+metadata:
+  name: default
+  namespace: velero
+  labels:
+    app.kubernetes.io/name: velero
+    app.kubernetes.io/component: backup-storage
+spec:
+  provider: aws
+  objectStorage:
+    bucket: three-tier-eks-cluster-velero-backups
+    prefix: backups
+  config:
+    region: us-east-1
+    s3ForcePathStyle: "false"
+    s3Url: https://s3.us-east-1.amazonaws.com

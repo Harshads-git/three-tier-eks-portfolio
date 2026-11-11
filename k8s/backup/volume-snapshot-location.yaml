@@ -1,0 +1,15 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/backup/volume-snapshot-location.yaml — EBS Snapshot Location
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: velero.io/v1
+kind: VolumeSnapshotLocation
+metadata:
+  name: default
+  namespace: velero
+  labels:
+    app.kubernetes.io/name: velero
+    app.kubernetes.io/component: volume-snapshots
+spec:
+  provider: aws
+  config:
+    region: us-east-1

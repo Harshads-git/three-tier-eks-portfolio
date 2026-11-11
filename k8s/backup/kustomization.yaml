@@ -1,0 +1,14 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/backup/kustomization.yaml — Velero Disaster Recovery Kustomization
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: velero
+
+resources:
+  - namespace.yaml
+  - serviceaccount.yaml
+  - backup-storage-location.yaml
+  - volume-snapshot-location.yaml
+  - schedule-daily.yaml

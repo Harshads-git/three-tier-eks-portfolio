@@ -1,0 +1,39 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# k8s/backup/schedule-daily.yaml — Automated Daily Cluster State Backup
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# POLICY:
+#   - Schedule: Runs every day at 02:00 AM UTC (cron: "0 2 * * *")
+#   - Retention (TTL): 720h (30 days)
+#   - Targets: Namespace `three-tier` (StatefulSets, Deployments, PVCs, Secrets, ConfigMaps)
+#   - Storage: Backs up metadata to S3 and creates AWS EBS snapshots for MongoDB volume
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: daily-three-tier-backup
+  namespace: velero
+  labels:
+    app.kubernetes.io/name: velero
+    app.kubernetes.io/component: backup-schedule
+spec:
+  # Cron expression: 02:00 UTC daily
+  schedule: "0 2 * * *"
+  useOwnerReferencesInBackup: false
+
+  template:
+    includedNamespaces:
+      - three-tier
+
+    # 30-day retention policy before automatic S3 object pruning
+    ttl: "720h0m0s"
+
+    # Capture EBS snapshots for persistent volume claims (MongoDB data)
+    snapshotVolumes: true
+
+    storageLocation: default
+    volumeSnapshotLocations:
+      - default
+
+    # Hook executions (e.g. fsync / lock if needed before snapshot)
+    hooks: {}
