@@ -292,6 +292,7 @@ three-tier-eks-portfolio/
 │   ├── kyverno/                     # Kyverno Admission Controller & ClusterPolicies
 │   ├── karpenter/                   # Karpenter v1 NodePool & EC2NodeClass specs
 │   ├── chaos/                       # Chaos Mesh operator & Pod/NetworkChaos experiments
+│   ├── backup/                      # Velero backup storage locations & daily schedules
 │   ├── network-policies/            # Zero-trust NetworkPolicies
 │   ├── pdb/                         # PodDisruptionBudgets
 │   ├── resource-quota/              # ResourceQuota + LimitRange
@@ -305,6 +306,7 @@ three-tier-eks-portfolio/
 │   ├── ecr.tf                       # Container registries
 │   ├── iam.tf                       # IRSA roles (GitHub, ALB, CA, EBS)
 │   ├── karpenter.tf                 # Karpenter IRSA, SQS interruption queue, Node Role
+│   ├── velero.tf                    # S3 backup bucket, lifecycle & Velero IRSA role
 │   ├── helm.tf                      # Helm releases (ALB ctrl, CA, metrics)
 │   ├── variables.tf                 # Input variables
 │   ├── outputs.tf                   # Output values (ECR URLs, cluster name)
@@ -329,7 +331,8 @@ three-tier-eks-portfolio/
 │   ├── k8s-apply.sh                # Ordered manifest deployment with readiness checks
 │   ├── seed-aws-secrets.sh         # Idempotent AWS Secrets Manager seeding
 │   ├── generate-sbom.sh            # Syft CycloneDX and SPDX SBOM generator
-│   └── run-chaos-experiment.sh     # Automated Chaos Mesh test harness & metric audit
+│   ├── run-chaos-experiment.sh     # Automated Chaos Mesh test harness & metric audit
+│   └── disaster-recovery-drill.sh  # Automated Velero disaster recovery drill & RTO scorecard
 │
 ├── 📁 gitops/                       # ArgoCD GitOps control plane
 │   ├── root-application.yaml        # App-of-Apps master bootstrap manifest
@@ -433,6 +436,7 @@ three-tier-eks-portfolio/
 | [Karpenter Autoscaling](docs/karpenter-autoscaling.md) | Next-gen just-in-time node provisioning & Spot consolidation |
 | [Distributed Tracing](docs/distributed-tracing.md) | Request waterfalls & profiling via OpenTelemetry & Jaeger |
 | [Chaos Engineering](docs/chaos-experiments.md) | Chaos Mesh fault injection, PDB resilience & failure recovery audit |
+| [Backup & Disaster Recovery](docs/backup-and-recovery.md) | Enterprise Velero state replication, EBS snapshots & RTO/RPO SLAs |
 | [Interview Prep](docs/interview-prep.md) | 12 technical Q&As with depth answers |
 
 ---

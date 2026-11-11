@@ -28,6 +28,7 @@
         karpenter-install karpenter-nodepool karpenter-nodes karpenter-logs \
         tracing-install jaeger-ui otel-logs \
         chaos-install chaos-dashboard chaos-pod-kill chaos-latency chaos-clean \
+        backup-install backup-create backup-list backup-restore dr-drill \
         build-backend build-frontend \
         clean
 
@@ -338,6 +339,34 @@ chaos-clean: ## Purge all active chaos experiments across the cluster
 	@echo "$(BLUE)Purging active chaos experiments...$(RESET)"
 	kubectl delete podchaos,networkchaos,stresschaos --all -n $(NAMESPACE) 2>/dev/null || true
 	@echo "$(GREEN)✓ All chaos experiments removed.$(RESET)"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# BACKUP & DISASTER RECOVERY (Velero)
+# ─────────────────────────────────────────────────────────────────────────────
+backup-install: ## Deploy Velero backup operator and AWS plugins
+	@echo "$(BLUE)Deploying Velero backup stack...$(RESET)"
+	kubectl apply -k k8s/backup/
+	@echo "$(GREEN)✓ Velero storage locations and daily schedules registered.$(RESET)"
+
+backup-create: ## Create on-demand backup snapshot of application namespace
+	@echo "$(BLUE)Triggering on-demand Velero backup for namespace $(NAMESPACE)...$(RESET)"
+	velero backup create on-demand-$(shell date +%Y%m%d-%H%M) \
+		--include-namespaces $(NAMESPACE) \
+		--snapshot-volumes=true \
+		--wait
+	@echo "$(GREEN)✓ Backup completed successfully.$(RESET)"
+
+backup-list: ## List all available Velero backups in S3
+	velero backup get
+
+backup-restore: ## Restore the application namespace from latest backup
+	@echo "$(BLUE)Restoring namespace $(NAMESPACE) from backup...$(RESET)"
+	velero restore create --from-backup $(shell velero backup get -o jsonpath='{.items[-1].metadata.name}') --wait
+	@echo "$(GREEN)✓ Restoration complete.$(RESET)"
+
+dr-drill: ## Execute automated disaster recovery drill script (RTO audit)
+	chmod +x scripts/disaster-recovery-drill.sh
+	./scripts/disaster-recovery-drill.sh --dry-run
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HEALTH & DIAGNOSTICS
