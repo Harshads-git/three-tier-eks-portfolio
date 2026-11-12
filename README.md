@@ -10,6 +10,10 @@
 [![Terraform](https://img.shields.io/badge/IaC-Terraform-7B42BC?logo=terraform&logoColor=white)](https://github.com/Harshads-git/three-tier-eks-portfolio/tree/main/terraform)
 [![Kubernetes](https://img.shields.io/badge/Platform-Kubernetes%201.29-326CE5?logo=kubernetes&logoColor=white)](https://github.com/Harshads-git/three-tier-eks-portfolio/tree/main/k8s)
 [![AWS](https://img.shields.io/badge/Cloud-AWS-FF9900?logo=amazon-aws&logoColor=white)](https://aws.amazon.com)
+[![GitOps ArgoCD](https://img.shields.io/badge/GitOps-ArgoCD-EF7B4D?logo=argo&logoColor=white)](https://argoproj.github.io/cd/)
+[![Karpenter](https://img.shields.io/badge/Autoscaling-Karpenter%20v1-00ADD8?logo=kubernetes&logoColor=white)](https://karpenter.sh)
+[![OpenTelemetry](https://img.shields.io/badge/Observability-OpenTelemetry-F5A800?logo=opentelemetry&logoColor=white)](https://opentelemetry.io)
+[![Release](https://img.shields.io/badge/Release-v2.0.0-blue.svg)](https://github.com/Harshads-git/three-tier-eks-portfolio/releases)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 <br/>
@@ -99,6 +103,11 @@ Internet
 ![Terraform](https://img.shields.io/badge/Terraform-7B42BC?style=for-the-badge&logo=terraform&logoColor=white)
 ![Kubernetes](https://img.shields.io/badge/Kubernetes-326CE5?style=for-the-badge&logo=kubernetes&logoColor=white)
 ![Helm](https://img.shields.io/badge/Helm-0F1689?style=for-the-badge&logo=helm&logoColor=white)
+![Karpenter](https://img.shields.io/badge/Karpenter_v1-00ADD8?style=for-the-badge&logo=kubernetes&logoColor=white)
+
+### Advanced GitOps & Progressive Delivery
+![ArgoCD](https://img.shields.io/badge/Argo_CD-EF7B4D?style=for-the-badge&logo=argo&logoColor=white)
+![Argo Rollouts](https://img.shields.io/badge/Argo_Rollouts-F25C54?style=for-the-badge&logo=argo&logoColor=white)
 
 ### Application
 ![React](https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)
@@ -107,13 +116,21 @@ Internet
 ![Nginx](https://img.shields.io/badge/Nginx-009639?style=for-the-badge&logo=nginx&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white)
 
-### CI/CD & Security
+### Security, Governance & Secrets
+![External Secrets](https://img.shields.io/badge/External_Secrets-009688?style=for-the-badge&logo=kubernetes&logoColor=white)
+![Kyverno](https://img.shields.io/badge/Kyverno-008080?style=for-the-badge&logo=kyverno&logoColor=white)
+![Sigstore Cosign](https://img.shields.io/badge/Cosign-4B32C3?style=for-the-badge&logo=sigstore&logoColor=white)
+![Syft SBOM](https://img.shields.io/badge/Syft_SBOM-0B3B60?style=for-the-badge&logo=anchor&logoColor=white)
 ![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-2088FF?style=for-the-badge&logo=github-actions&logoColor=white)
 ![Trivy](https://img.shields.io/badge/Trivy-1904DA?style=for-the-badge&logo=aqua-security&logoColor=white)
 
-### Observability
+### Observability & Resilience
 ![Prometheus](https://img.shields.io/badge/Prometheus-E6522C?style=for-the-badge&logo=prometheus&logoColor=white)
 ![Grafana](https://img.shields.io/badge/Grafana-F46800?style=for-the-badge&logo=grafana&logoColor=white)
+![OpenTelemetry](https://img.shields.io/badge/OpenTelemetry-F5A800?style=for-the-badge&logo=opentelemetry&logoColor=white)
+![Jaeger](https://img.shields.io/badge/Jaeger-60D0E4?style=for-the-badge&logo=jaeger&logoColor=white)
+![Chaos Mesh](https://img.shields.io/badge/Chaos_Mesh-2B6CB0?style=for-the-badge&logo=kubernetes&logoColor=white)
+![Velero](https://img.shields.io/badge/Velero_DR-00A98F?style=for-the-badge&logo=vmware&logoColor=white)
 ![k6](https://img.shields.io/badge/k6-7D64FF?style=for-the-badge&logo=k6&logoColor=white)
 
 ---
@@ -437,6 +454,7 @@ three-tier-eks-portfolio/
 | [Distributed Tracing](docs/distributed-tracing.md) | Request waterfalls & profiling via OpenTelemetry & Jaeger |
 | [Chaos Engineering](docs/chaos-experiments.md) | Chaos Mesh fault injection, PDB resilience & failure recovery audit |
 | [Backup & Disaster Recovery](docs/backup-and-recovery.md) | Enterprise Velero state replication, EBS snapshots & RTO/RPO SLAs |
+| [Executive Summary](docs/executive-summary.md) | 30-day platform engineering architecture evolution & production metrics |
 | [Interview Prep](docs/interview-prep.md) | 12 technical Q&As with depth answers |
 
 ---
@@ -453,7 +471,7 @@ three-tier-eks-portfolio/
 | **Showcase & DX** | 18–20 | Master README, Makefile, .pre-commit, `k8s-apply.sh`, Validation & Retrospective | ✅ Done |
 | **Advanced GitOps & Secrets**| 21–23 | ArgoCD App-of-Apps, Canary Rollouts, External Secrets Operator | ✅ Done |
 | **Enterprise Governance & Scaling**| 24–26 | Kyverno Policy-as-Code, Cosign Image Signing, SBOM, Karpenter v1 | ✅ Done |
-| **Observability & Resilience** | 27–30 | OpenTelemetry Distributed Tracing, Chaos Testing, Velero Backup | 🔄 In Progress |
+| **Observability, Resilience & Release** | 27–30 | OpenTelemetry Tracing, Chaos Testing, Velero Backup, v2.0.0 Release | ✅ Done |
 
 **4 commits/day with architecture-first commit bodies explaining the WHY.**
 
