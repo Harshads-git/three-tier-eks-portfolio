@@ -455,6 +455,7 @@ three-tier-eks-portfolio/
 | [Chaos Engineering](docs/chaos-experiments.md) | Chaos Mesh fault injection, PDB resilience & failure recovery audit |
 | [Backup & Disaster Recovery](docs/backup-and-recovery.md) | Enterprise Velero state replication, EBS snapshots & RTO/RPO SLAs |
 | [Executive Summary](docs/executive-summary.md) | 30-day platform engineering architecture evolution & production metrics |
+| [Release Notes v2.0.0](docs/release-notes-v2.0.0.md) | Official v2.0.0 platform engineering release notes & capability snapshot |
 | [Interview Prep](docs/interview-prep.md) | 12 technical Q&As with depth answers |
 
 ---
