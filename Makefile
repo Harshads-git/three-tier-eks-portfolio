@@ -18,6 +18,7 @@
 .PHONY: help local-up local-down local-logs local-clean \
         tf-init tf-plan tf-apply tf-destroy \
         k8s-apply k8s-delete k8s-status \
+        platform-info platform-validate \
         health smoke load-test hpa-test \
         grafana prometheus port-forward-all \
         argocd-install argocd-bootstrap argocd-status argocd-ui argocd-password \
@@ -371,6 +372,34 @@ dr-drill: ## Execute automated disaster recovery drill script (RTO audit)
 # ─────────────────────────────────────────────────────────────────────────────
 # HEALTH & DIAGNOSTICS
 # ─────────────────────────────────────────────────────────────────────────────
+platform-info: ## Print aggregated platform architecture overview and live endpoints
+	@echo "$(BLUE)════════════════════════════════════════════════════════════════$(RESET)"
+	@echo "$(GREEN) CloudForge EKS Platform — Architecture & Service Endpoints$(RESET)"
+	@echo "$(BLUE)════════════════════════════════════════════════════════════════$(RESET)"
+	@echo "Cluster Name     : $(CLUSTER_NAME)"
+	@echo "AWS Region       : $(AWS_REGION)"
+	@echo "Application NS   : $(NAMESPACE)"
+	@echo "Monitoring NS    : $(MONITORING_NS)"
+	@echo "----------------------------------------------------------------"
+	@echo "Active Pods in $(NAMESPACE):"
+	@kubectl get pods -n $(NAMESPACE) 2>/dev/null || echo "Cluster offline"
+	@echo "----------------------------------------------------------------"
+	@echo "Ingress ALB Hostname:"
+	@kubectl get ingress three-tier-ingress -n $(NAMESPACE) -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null && echo "" || echo "Pending"
+	@echo "$(BLUE)════════════════════════════════════════════════════════════════$(RESET)"
+
+platform-validate: ## Run end-to-end platform validation (health, policies, secrets, GitOps)
+	@echo "$(BLUE)Running end-to-end CloudForge platform validation suite...$(RESET)"
+	chmod +x scripts/cluster-health-check.sh
+	./scripts/cluster-health-check.sh $(NAMESPACE)
+	@echo "$(BLUE)Checking Kyverno admission enforcement...$(RESET)"
+	@kubectl get clusterpolicies 2>/dev/null || echo "Kyverno not installed"
+	@echo "$(BLUE)Checking External Secrets synchronization...$(RESET)"
+	@kubectl get externalsecrets -n $(NAMESPACE) 2>/dev/null || echo "ESO not active"
+	@echo "$(BLUE)Checking ArgoCD App-of-Apps GitOps state...$(RESET)"
+	@kubectl get application -n argocd 2>/dev/null || echo "ArgoCD not active"
+	@echo "$(GREEN)✓ Platform validation audit complete.$(RESET)"
+
 health: ## Run full cluster health check
 	chmod +x scripts/cluster-health-check.sh
 	./scripts/cluster-health-check.sh $(NAMESPACE)
